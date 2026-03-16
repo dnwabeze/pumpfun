@@ -1,0 +1,22 @@
+{
+  "name": "pumpfun",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@solana/web3.js": "^1.98.4",
+    "axios": "^1.13.6",
+    "bs58": "^6.0.0",
+    "dotenv": "^17.3.1",
+    "input": "^1.0.1",
+    "telegram": "^2.26.22",
+    "ws": "^8.19.0"
+  }
+}
