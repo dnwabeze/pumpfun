@@ -5,7 +5,7 @@ const { TelegramClient } = require('telegram');
 const { StringSession } = require('telegram/sessions');
 const input = require('input');
 const fs = require('fs');
-
+const jitoBuyer = require('./jito_buyer');
 const normalizeSocial = (url) => {
     if (!url) return '';
     return url.toLowerCase().trim()
@@ -131,6 +131,10 @@ async function handleNewToken(data) {
         console.log(`Telegram: ${telegram || 'None'}`);
         console.log(`Trade Link: https://pump.fun/${mintAddress}`);
         console.log('======================================================\n');
+
+        if (jitoBuyer.isEnabled) {
+            jitoBuyer.buyToken(mintAddress);
+        }
 
         if (client && forwardBot) {
             try {
