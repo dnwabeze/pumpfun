@@ -116,17 +116,13 @@ async function handleNewToken(data) {
 
     if (targetX && twitterNorm && twitterNorm.includes(targetX)) {
         matchX = true;
-    } else if (!targetX) {
-        matchX = true;
     }
     
     if (targetTelegram && telegramNorm && telegramNorm.includes(targetTelegram)) {
         matchTg = true;
-    } else if (!targetTelegram) {
-        matchTg = true;
     }
 
-    if (matchX && matchTg && (targetX || targetTelegram)) {
+    if (matchX || matchTg) {
         console.log('\n======================================================');
         console.log('🚨 TARGET SOCIALS DETECTED ON NEW TOKEN! 🚨');
         console.log(`Mint Address: ${mintAddress}`);
