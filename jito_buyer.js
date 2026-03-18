@@ -58,10 +58,12 @@ async function buyToken(mintAddress) {
             "mint": mintAddress,
             "denominatedInSol": "true",
             "amount": process.env.BUY_AMOUNT_SOL || 0.01,
-            "slippage": 15,
-            "priorityFee": 0.0001,
+            "slippage": parseFloat(process.env.SLIPPAGE || "15"),
+            "priorityFee": parseFloat(process.env.PRIORITY_FEE || "0.0001"),
             "pool": "pump"
         };
+
+        console.log(`[JitoBuyer] 🧪 Trade Params - Buy: ${localTradeParams.amount} SOL | Slippage: ${localTradeParams.slippage}% | Priority Fee: ${localTradeParams.priorityFee} SOL | Jito Tip: ${process.env.JITO_TIP_AMOUNT_SOL} SOL`);
         
         const response = await axios.post(`https://pumpportal.fun/api/trade-local`, localTradeParams, {
             responseType: 'arraybuffer' // important for getting the binary transaction
@@ -108,7 +110,7 @@ async function buyToken(mintAddress) {
 
         if (process.env.JITO_DRY_RUN === 'true') {
             console.log(`[JitoBuyer] 🧪 DRY RUN MODE ACTIVE - Bundle successfully constructed and signed, but NOT sent.`);
-            console.log(`[JitoBuyer] 🧪 Buy Amount: ${process.env.BUY_AMOUNT_SOL} SOL | Jito Tip: ${tipAmountSol} SOL`);
+            console.log(`[JitoBuyer] 🧪 Buy Amount: ${process.env.BUY_AMOUNT_SOL} SOL | Jito Tip: ${tipAmountSol} SOL | Slippage: ${process.env.SLIPPAGE}% | Priority Fee: ${process.env.PRIORITY_FEE} SOL`);
             return;
         }
 
