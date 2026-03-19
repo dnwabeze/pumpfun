@@ -141,8 +141,8 @@ async function runRadar() {
                 if (tweet.favorite_count < MIN_LIKES) continue;
                 if (tweet.user.followers_count < 100) continue;
 
-                // 4. Strict Rate Limiting (Wait 6s between AI calls to stay < 10 RPM)
-                await new Promise(r => setTimeout(r, 6000));
+                // 4. Extreme Rate Limiting (Wait 12s between AI calls to stay < 5 RPM)
+                await new Promise(r => setTimeout(r, 12000));
                 analyzedCount++;
 
                 try {
@@ -168,9 +168,9 @@ async function runRadar() {
                     }
                 } catch (aiErr) {
                     if (aiErr.message.includes('429')) {
-                        console.error("⛔ Rate limited by Gemini. Cooling down for 60s...");
-                        await new Promise(r => setTimeout(r, 60000));
-                        break; // Stop current query processing
+                        console.error("⛔ Rate limited by Gemini. Cooling down for 120s...");
+                        await new Promise(r => setTimeout(r, 120000));
+                        break; 
                     } else {
                         console.error("AI Error:", aiErr.message);
                     }
