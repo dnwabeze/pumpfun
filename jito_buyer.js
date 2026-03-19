@@ -147,9 +147,27 @@ async function buyToken(mintAddress) {
                     "pool": "pump"
                 };
 
-                const response = await axios.post(`https://pumpportal.fun/api/trade-local`, localTradeParams, {
-                    responseType: 'arraybuffer'
-                });
+                let response;
+                let lastError;
+                for (let i = 0; i < 3; i++) {
+                    try {
+                        response = await axios.post(`https://pumpportal.fun/api/trade-local`, localTradeParams, {
+                            responseType: 'arraybuffer',
+                            timeout: 10000
+                        });
+                        break;
+                    } catch (e) {
+                        lastError = e;
+                        if (e.response?.status === 400) {
+                            // If 400, might be too new, wait and retry
+                            await new Promise(r => setTimeout(r, 1000));
+                            continue;
+                        }
+                        throw e;
+                    }
+                }
+
+                if (!response) throw lastError;
 
                 const txBytes = new Uint8Array(response.data);
                 const tx = VersionedTransaction.deserialize(txBytes);
@@ -255,36 +273,27 @@ async function buyToken(mintAddress) {
     }
 }
 
-async function getTokenBalance(connection, walletPublicKey, mintAddress) {
-    try {
-        const filters = [
-            {
-                dataSize: 165,
-            },
-            {
-                memcmp: {
-                    offset: 32,
-                    bytes: walletPublicKey,
-                },
-            },
-            {
-                memcmp: {
-                    offset: 0,
-                    bytes: mintAddress,
-                },
-            },
-        ];
-        const accounts = await connection.getParsedTokenAccountsByOwner(
-            new PublicKey(walletPublicKey),
-            { mint: new PublicKey(mintAddress) }
-        );
+async function getTokenBalance(connection, walletPublicKey, mintAddress, retries = 3) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            const accounts = await connection.getParsedTokenAccountsByOwner(
+                new PublicKey(walletPublicKey),
+                { mint: new PublicKey(mintAddress) }
+            );
 
-        if (accounts.value.length === 0) return 0;
-        return accounts.value[0].account.data.parsed.info.tokenAmount.amount;
-    } catch (e) {
-        console.error(`Error getting token balance: ${e.message}`);
-        return 0;
+            if (accounts.value.length === 0) return 0;
+            return accounts.value[0].account.data.parsed.info.tokenAmount.amount;
+        } catch (e) {
+            if (e.message.includes('could not find mint') && i < retries - 1) {
+                // If mint is not found, wait a bit for RPC to index it
+                await new Promise(r => setTimeout(r, 2000));
+                continue;
+            }
+            console.error(`Error getting token balance for ${walletPublicKey}: ${e.message}`);
+            return 0;
+        }
     }
+    return 0;
 }
 
 async function sellToken(mintAddress, amountPercentage = 100) {
@@ -324,15 +333,28 @@ async function sellToken(mintAddress, amountPercentage = 100) {
                     "action": "sell",
                     "mint": mintAddress,
                     "denominatedInSol": "false",
-                    "amount": sellAmount,
+                    "amount": sellAmount.toString(), // ensure it is string
                     "slippage": slippage,
                     "priorityFee": priorityFeeSol,
                     "pool": "pump"
                 };
 
-                const response = await axios.post(`https://pumpportal.fun/api/trade-local`, localTradeParams, {
-                    responseType: 'arraybuffer'
-                });
+                let response;
+                for (let i = 0; i < 3; i++) {
+                    try {
+                        response = await axios.post(`https://pumpportal.fun/api/trade-local`, localTradeParams, {
+                            responseType: 'arraybuffer',
+                            timeout: 10000
+                        });
+                        break;
+                    } catch (e) {
+                        if (e.response?.status === 400 && i < 2) {
+                            await new Promise(r => setTimeout(r, 1000));
+                            continue;
+                        }
+                        throw e;
+                    }
+                }
 
                 const txBytes = new Uint8Array(response.data);
                 const tx = VersionedTransaction.deserialize(txBytes);

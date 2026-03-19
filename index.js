@@ -248,12 +248,15 @@ async function startScanner() {
                     if (position.buyMarketCap > 0) {
                         const pnlPercent = ((currentMC - position.buyMarketCap) / position.buyMarketCap) * 100;
                         
+                        // Debug log for TP/SL check
+                        // console.log(`[CHECK] ${position.symbol} PnL: ${pnlPercent.toFixed(2)}% | SL: ${SL_PERCENT}% | TP: ${TP_PERCENT}%`);
+
                         if (pnlPercent >= TP_PERCENT) {
-                            console.log(`💰 [TAKE PROFIT] ${position.symbol} hit TP: ${pnlPercent.toFixed(2)}%! Selling...`);
+                            console.log(`💰 [TAKE PROFIT] ${position.symbol} hit TP: ${pnlPercent.toFixed(2)}%! (Threshold: ${TP_PERCENT}%) Selling...`);
                             await jitoBuyer.sellToken(mint);
                             positionManager.removePosition(mint);
                         } else if (pnlPercent <= SL_PERCENT) {
-                            console.log(`📉 [STOP LOSS] ${position.symbol} hit SL: ${pnlPercent.toFixed(2)}%! Selling...`);
+                            console.log(`📉 [STOP LOSS] ${position.symbol} hit SL: ${pnlPercent.toFixed(2)}%! (Threshold: ${SL_PERCENT}%) Selling...`);
                             await jitoBuyer.sellToken(mint);
                             positionManager.removePosition(mint);
                         }
