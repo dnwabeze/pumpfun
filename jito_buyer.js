@@ -5,19 +5,26 @@ const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
 
+const JITO_REGIONS = [
+    "https://amsterdam.mainnet.block-engine.jito.wtf/api/v1/bundles",
+    "https://frankfurt.mainnet.block-engine.jito.wtf/api/v1/bundles",
+    "https://ny.mainnet.block-engine.jito.wtf/api/v1/bundles",
+    "https://tokyo.mainnet.block-engine.jito.wtf/api/v1/bundles"
+];
+
 const RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
-const JITO_ENGINE = process.env.JITO_BLOCK_ENGINE_URL || "https://mainnet.block-engine.jito.wtf/api/v1/bundles";
+const JITO_ENGINE = process.env.JITO_BLOCK_ENGINE_URL || JITO_REGIONS[0]; // Default to Amsterdam for Nigeria
 const ERROR_LOG_FILE = path.join(__dirname, 'buy_errors.log');
 
 const TIP_ACCOUNTS = [
-    "96gYZGLnJYVFmbjzopPSU6QiCRg1uPXqkEw",
-    "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
-    "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvVkY",
-    "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49",
-    "DfXygSm4jcyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjv",
-    "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt",
-    "DttWaMuVvTiduZRnguLF7FsBog82KNTAA1D2RMYfC2eR",
-    "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeMgRwjLFmZ"
+    "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5", // jitotip1
+    "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe", // jitotip2
+    "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvVkY", // jitotip3
+    "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49", // jitotip4
+    "DfXygSm4jcyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjv", // jitotip5
+    "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt", // jitotip6
+    "DttWaMuVvTiduZRnguLF7FsBog82KNTAA1D2RMYfC2eR", // jitotip7
+    "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeMgRwjLFmZ"  // jitotip8
 ];
 
 let connection;
@@ -182,7 +189,6 @@ async function buyToken(mintAddress) {
         const tx2Base58 = bs58.encode(tx2.serialize());
 
         // 3. Send Bundle
-        console.log(`[JitoBuyer] Sending bundle with ${tipAmountSol} SOL tip to Jito...`);
         const payload = {
             jsonrpc: "2.0",
             id: 1,
@@ -195,38 +201,53 @@ async function buyToken(mintAddress) {
             return;
         }
 
-        try {
-            const jitoRes = await axios.post(JITO_ENGINE, payload, {
-                headers: { 'Content-Type': 'application/json' }
-            });
+        let bundleId = null;
+        let success = false;
+        
+        // Try multiple Jito regions if one fails
+        const enginesToTry = process.env.JITO_BLOCK_ENGINE_URL ? [process.env.JITO_BLOCK_ENGINE_URL] : JITO_REGIONS;
 
-            if (jitoRes.data?.error) {
-                logError(`❌ [JitoBuyer] Jito Bundle Rejected (Initial Validation Error)`, jitoRes.data.error);
-                return;
-            }
-
-            const bundleId = jitoRes.data?.result;
-            if (!bundleId) {
-                logError(`❌ [JitoBuyer] No bundleId returned`, jitoRes.data);
-                return;
-            }
-
-            console.log(`✅ [JitoBuyer] Bundle sent! ID: ${bundleId}`);
-            console.log(`Verify: https://explorer.jito.wtf/bundle/${bundleId}`);
-
-            // 4. Wait for confirmation
-            const landed = await checkBundleStatus(bundleId);
-            if (landed) {
-                console.log(`🎉 [JitoBuyer] Bundle landed successfully!`);
-            } else {
-                logError(`⚠️ [JitoBuyer] Bundle ${bundleId} did not land within timeout.`, {
-                    reason: "Likely slippage exceeded or high competition. Check Jito explorer for details.",
-                    explorer: `https://explorer.jito.wtf/bundle/${bundleId}`
+        for (const engine of enginesToTry) {
+            try {
+                console.log(`[JitoBuyer] Sending bundle to Jito (${new URL(engine).hostname})...`);
+                const jitoRes = await axios.post(engine, payload, {
+                    headers: { 'Content-Type': 'application/json' },
+                    timeout: 15000
                 });
-            }
 
-        } catch (jitoError) {
-            logError(`❌ [JitoBuyer] Jito RPC connection error`, jitoError.response?.data || jitoError.message);
+                if (jitoRes.data?.error) {
+                    console.error(`❌ [JitoBuyer] Jito Error (${new URL(engine).hostname}):`, jitoRes.data.error);
+                    continue; // Try next engine
+                }
+
+                bundleId = jitoRes.data?.result;
+                if (bundleId) {
+                    success = true;
+                    break;
+                }
+            } catch (jitoError) {
+                const errorMsg = jitoError.response?.data || jitoError.message;
+                console.error(`⚠️ [JitoBuyer] Connection failed for ${new URL(engine).hostname}: ${typeof errorMsg === 'object' ? JSON.stringify(errorMsg) : errorMsg}`);
+            }
+        }
+
+        if (!success) {
+            logError(`❌ [JitoBuyer] All Jito RPC attempts failed.`, "Check connectivity and tip amount.");
+            return;
+        }
+
+        console.log(`✅ [JitoBuyer] Bundle sent! ID: ${bundleId}`);
+        console.log(`Verify: https://explorer.jito.wtf/bundle/${bundleId}`);
+
+        // 4. Wait for confirmation
+        const landed = await checkBundleStatus(bundleId);
+        if (landed) {
+            console.log(`🎉 [JitoBuyer] Bundle landed successfully!`);
+        } else {
+            logError(`⚠️ [JitoBuyer] Bundle ${bundleId} did not land within timeout.`, {
+                reason: "Likely slippage exceeded or high competition. Check Jito explorer for details.",
+                explorer: `https://explorer.jito.wtf/bundle/${bundleId}`
+            });
         }
 
     } catch (error) {
