@@ -76,7 +76,7 @@ Return ONLY JSON.
 
     try {
         const response = await axios.post(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${AI_API_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-8b:generateContent?key=${AI_API_KEY}`,
             {
                 contents: [{ parts: [{ text: prompt }] }]
             }
@@ -153,8 +153,11 @@ async function runRadar() {
                 if (tweet.favorite_count < MIN_LIKES) continue;
                 if (tweet.user.followers_count < 100) continue;
 
-                // 4. Ultra Rate Limiting (30s between AI calls to stay < 2 RPM)
-                await new Promise(r => setTimeout(r, 30000));
+                // 4. Ultra Rate Limiting (60s before first, 30s after)
+                const waitTime = analyzedCount === 0 ? 60000 : 30000;
+                console.log(`⏳ Waiting ${waitTime/1000}s for AI quota...`);
+                await new Promise(r => setTimeout(r, waitTime));
+                
                 analyzedCount++;
 
                 try {
