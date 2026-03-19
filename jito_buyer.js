@@ -293,7 +293,6 @@ async function getTokenBalance(connection, walletPublicKey, mintAddress, retries
     const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
     const SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
     
-    // 1. Derive the ATA address deterministically
     const [ataAddress] = PublicKey.findProgramAddressSync(
         [
             new PublicKey(walletPublicKey).toBuffer(),
@@ -303,46 +302,39 @@ async function getTokenBalance(connection, walletPublicKey, mintAddress, retries
         SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID
     );
 
+    // console.log(`[BALANCE_DEBUG] Checking ATA: ${ataAddress.toBase58()} for wallet ${walletPublicKey}`);
+
     for (let i = 0; i < retries; i++) {
         try {
-            // 2. Query the direct account balance (faster than getParsedTokenAccountsByOwner)
             const balanceResponse = await connection.getTokenAccountBalance(ataAddress, "confirmed");
-            
-            if (balanceResponse.value) {
+            if (balanceResponse && balanceResponse.value) {
                 return balanceResponse.value.amount;
             }
         } catch (e) {
-            // If account is not found, the RPC might not have indexed it yet
-            if (e.message.includes('could not find account') || e.message.includes('Account not found')) {
-                if (i < retries - 1) {
-                    // console.log(`[BALANCE] ATA ${ataAddress.toBase58()} not found yet. Retrying (${i+1}/${retries})...`);
-                    await new Promise(r => setTimeout(r, 500));
-                    continue;
-                }
-            } else {
-                console.error(`Error getting direct balance for ${walletPublicKey}: ${e.message}`);
-                // Fall back to the slower grouped query if it's not an "account not found" error
+            // Log the error for diagnosis
+            if (i === 0 || i === retries - 1) {
+                // console.log(`[BALANCE_DEBUG] Attempt ${i+1}: ${e.message}`);
+            }
+
+            // Treat almost any error during the first few seconds as "not found yet"
+            if (i < retries - 1) {
+                await new Promise(r => setTimeout(r, 1000)); // wait 1s
+                continue;
             }
         }
 
-        // 3. Fallback (optional, but keep it robust)
+        // Secondary fallback
         try {
             const accounts = await connection.getParsedTokenAccountsByOwner(
                 new PublicKey(walletPublicKey),
                 { programId: TOKEN_PROGRAM_ID }
             );
-
-            const targetAccount = accounts.value.find(acc => 
-                acc.account.data.parsed.info.mint === mintAddress
-            );
-
-            if (targetAccount) {
-                return targetAccount.account.data.parsed.info.tokenAmount.amount;
-            }
+            const target = accounts.value.find(acc => acc.account.data.parsed.info.mint === mintAddress);
+            if (target) return target.account.data.parsed.info.tokenAmount.amount;
         } catch (e) {}
 
         if (i < retries - 1) {
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 1000));
         }
     }
     return 0;
