@@ -279,50 +279,58 @@ async function buyToken(mintAddress) {
 
 async function getTokenBalance(connection, walletPublicKey, mintAddress, retries = 10) {
     const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    const SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID = new PublicKey("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
     
+    // 1. Derive the ATA address deterministically
+    const [ataAddress] = PublicKey.findProgramAddressSync(
+        [
+            new PublicKey(walletPublicKey).toBuffer(),
+            TOKEN_PROGRAM_ID.toBuffer(),
+            new PublicKey(mintAddress).toBuffer()
+        ],
+        SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID
+    );
+
     for (let i = 0; i < retries; i++) {
+        try {
+            // 2. Query the direct account balance (faster than getParsedTokenAccountsByOwner)
+            const balanceResponse = await connection.getTokenAccountBalance(ataAddress, "confirmed");
+            
+            if (balanceResponse.value) {
+                return balanceResponse.value.amount;
+            }
+        } catch (e) {
+            // If account is not found, the RPC might not have indexed it yet
+            if (e.message.includes('could not find account') || e.message.includes('Account not found')) {
+                if (i < retries - 1) {
+                    // console.log(`[BALANCE] ATA ${ataAddress.toBase58()} not found yet. Retrying (${i+1}/${retries})...`);
+                    await new Promise(r => setTimeout(r, 500));
+                    continue;
+                }
+            } else {
+                console.error(`Error getting direct balance for ${walletPublicKey}: ${e.message}`);
+                // Fall back to the slower grouped query if it's not an "account not found" error
+            }
+        }
+
+        // 3. Fallback (optional, but keep it robust)
         try {
             const accounts = await connection.getParsedTokenAccountsByOwner(
                 new PublicKey(walletPublicKey),
                 { programId: TOKEN_PROGRAM_ID }
             );
 
-            if (accounts.value.length === 0) {
-                if (i < retries - 1) {
-                    // console.log(`[DEBUG] No token accounts found for ${walletPublicKey} yet. Retrying...`);
-                    await new Promise(r => setTimeout(r, 1000));
-                    continue;
-                }
-                return 0;
-            }
-
-            // Find the account matching the mint address
             const targetAccount = accounts.value.find(acc => 
                 acc.account.data.parsed.info.mint === mintAddress
             );
 
-            if (!targetAccount) {
-                if (i < retries - 1) {
-                    console.log(`[BALANCE] Wallet ${walletPublicKey} has ${accounts.value.length} token accounts, but not ${mintAddress} yet. Retrying...`);
-                    // Log all mints found to diagnose
-                    // const foundMints = accounts.value.map(a => a.account.data.parsed.info.mint);
-                    // console.log(`[DEBUG] Found mints: ${foundMints.join(', ')}`);
-                    await new Promise(r => setTimeout(r, 1000));
-                    continue;
-                }
-                return 0;
+            if (targetAccount) {
+                return targetAccount.account.data.parsed.info.tokenAmount.amount;
             }
+        } catch (e) {}
 
-            const amount = targetAccount.account.data.parsed.info.tokenAmount.amount;
-            // console.log(`[BALANCE] Found balance for ${mintAddress}: ${amount}`);
-            return amount;
-        } catch (e) {
-            console.error(`Error getting token balance for ${walletPublicKey}: ${e.message}`);
-            if (i < retries - 1) {
-                await new Promise(r => setTimeout(r, 1000));
-                continue;
-            }
-            return 0;
+        if (i < retries - 1) {
+            await new Promise(r => setTimeout(r, 500));
         }
     }
     return 0;
