@@ -19,12 +19,12 @@ const ERROR_LOG_FILE = path.join(__dirname, 'buy_errors.log');
 const TIP_ACCOUNTS = [
     "96gYZGLnJYVFmbjzopPSU6QiEV5fGqZNyN9nmNhvrZU5", // jitotip1
     "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe", // jitotip2
-    "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvVkY", // jitotip3
+    "Cw8CFyM9FkoMi7K7Crf6HNQqf4uEMzpKw6QNghXLvLkY", // jitotip3
     "ADaUMid9yfUytqMBgopwjb2DTLSokTSzL1zt6iGPaS49", // jitotip4
-    "DfXygSm4jcyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjv", // jitotip5
+    "DfXygSm4jCyNCybVYYK6DwvWqjKee8pbDmJGcLWNDXjh", // jitotip5
     "ADuUkR4vqLUMWXxW9gh6D6L8pMSawimctcNZ5pGwDcEt", // jitotip6
-    "DttWaMuVvTiduZRnguLF7FsBog82KNTAA1D2RMYfC2eR", // jitotip7
-    "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeMgRwjLFmZ"  // jitotip8
+    "DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL", // jitotip7
+    "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"  // jitotip8
 ];
 
 let connection;
