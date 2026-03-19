@@ -89,12 +89,20 @@ Return ONLY JSON.
     }
 }
 
+let isRadarRunning = false;
+
 async function runRadar() {
+    if (isRadarRunning) {
+        console.log("⚠️ [X-RADAR] Scan already in progress, skipping this cycle.");
+        return;
+    }
+    
     if (!SOCIALDATA_API_KEY) {
         console.error("❌ SOCIALDATA_API_KEY missing.");
         return;
     }
 
+    isRadarRunning = true;
     console.log("🔍 [X-RADAR] Scanning for direct launch keywords...");
 
     // Simplified, direct queries
@@ -112,12 +120,12 @@ async function runRadar() {
                 headers: { 'Authorization': `Bearer ${SOCIALDATA_API_KEY}` }
             });
 
-            const tweets = (res.data.tweets || []).slice(0, 10); // Only look at top 10 latest
-            console.log(`   Processing up to 5 best candidates for query: ${query}`);
+            const tweets = (res.data.tweets || []).slice(0, 10);
+            console.log(`   Processing up to 3 best candidates for query: ${query}`);
 
             let analyzedCount = 0;
             for (const tweet of tweets) {
-                if (analyzedCount >= 5) break; // Hard limit per category to save AI credits/rate-limits
+                if (analyzedCount >= 3) break; // Reduced to 3 to stay safely under 15 RPM
 
                 // 1. Deduplication
                 if (processedTweets.has(tweet.id_str)) continue;
@@ -133,39 +141,46 @@ async function runRadar() {
                 if (tweet.favorite_count < MIN_LIKES) continue;
                 if (tweet.user.followers_count < 100) continue;
 
-                // 4. Rate Limiting (Wait 2s between AI calls to avoid 429)
-                await new Promise(r => setTimeout(r, 2000));
+                // 4. Strict Rate Limiting (Wait 6s between AI calls to stay < 10 RPM)
+                await new Promise(r => setTimeout(r, 6000));
                 analyzedCount++;
 
-                const analysis = await analyzeTweet(tweet);
-                if (analysis && analysis.isLaunch && analysis.confidenceScore > 75) {
-                    process.stdout.write('🎯 '); // Visual indicator in console
-                    
-                    const typeLabel = analysis.type === 'token_launch' ? '🚀 TOKEN LAUNCH' : '🛠️ PRODUCT LAUNCH';
-                    const tokenInfo = analysis.hasToken ? `*Ticker:* $${analysis.symbol}\n` : `*No Token Detected (Product Only)*\n`;
+                try {
+                    const analysis = await analyzeTweet(tweet);
+                    if (analysis && analysis.isLaunch && analysis.confidenceScore > 75) {
+                        process.stdout.write('🎯 '); 
+                        
+                        const typeLabel = analysis.type === 'token_launch' ? '🚀 TOKEN LAUNCH' : '🛠️ PRODUCT LAUNCH';
+                        const tokenInfo = analysis.hasToken ? `*Ticker:* $${analysis.symbol}\n` : `*No Token Detected (Product Only)*\n`;
 
-                    const alertMsg = `🦅 *RADAR DETECTION: ${typeLabel}*\n\n` +
-                        `*Project:* ${analysis.name}\n` +
-                        tokenInfo + 
-                        `*Reason:* ${analysis.reason}\n\n` +
-                        `*Time:* ${ageMinutes.toFixed(0)} minutes ago\n` +
-                        `*Tweet:* [View on X](https://x.com/${tweet.user.screen_name}/status/${tweet.id_str})\n\n` +
-                        `🤖 _AI Analysis powered by Gemini_`;
-                    
-                    await sendTelegramAlert(alertMsg);
-                    
-                    // Mark as processed
-                    processedTweets.add(tweet.id_str);
-                    saveProcessed();
-
-                    // Sleep to avoid Telegram rate limits
-                    await new Promise(r => setTimeout(r, 2000));
+                        const alertMsg = `🦅 *RADAR DETECTION: ${typeLabel}*\n\n` +
+                            `*Project:* ${analysis.name}\n` +
+                            tokenInfo + 
+                            `*Reason:* ${analysis.reason}\n\n` +
+                            `*Time:* ${ageMinutes.toFixed(0)} minutes ago\n` +
+                            `*Tweet:* [View on X](https://x.com/${tweet.user.screen_name}/status/${tweet.id_str})\n\n` +
+                            `🤖 _AI Analysis powered by Gemini_`;
+                        
+                        await sendTelegramAlert(alertMsg);
+                        
+                        processedTweets.add(tweet.id_str);
+                        saveProcessed();
+                    }
+                } catch (aiErr) {
+                    if (aiErr.message.includes('429')) {
+                        console.error("⛔ Rate limited by Gemini. Cooling down for 60s...");
+                        await new Promise(r => setTimeout(r, 60000));
+                        break; // Stop current query processing
+                    } else {
+                        console.error("AI Error:", aiErr.message);
+                    }
                 }
             }
         } catch (err) {
             console.error(`Search failed: ${err.message}`);
         }
     }
+    isRadarRunning = false;
 }
 
 // Run immediately, then interval
