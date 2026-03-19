@@ -35,6 +35,9 @@ const apiHash = process.env.TELEGRAM_API_HASH;
 const forwardBot = process.env.FORWARD_BOT_USERNAME;
 const sessionFile = 'session.txt';
 
+const TELEGRAM_BOT_TOKEN_API = process.env.TELEGRAM_BOT_TOKEN_API;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+
 // State
 let tokensChecked = 0;
 let emptySocials = 0;
@@ -94,11 +97,15 @@ async function initTelegram() {
 }
 
 async function sendTelegramAlert(msg) {
-    if (client && forwardBot) {
+    if (TELEGRAM_BOT_TOKEN_API && TELEGRAM_CHAT_ID) {
         try {
-            await client.sendMessage(forwardBot, { message: msg });
+            await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN_API}/sendMessage`, {
+                chat_id: TELEGRAM_CHAT_ID,
+                text: msg,
+                disable_web_page_preview: true
+            });
         } catch (err) {
-            console.error(`❌ Failed to forward to Telegram: ${err.message}`);
+            console.error(`❌ Failed to send BotFather alert: ${err.response?.data?.description || err.message}`);
         }
     }
 }
@@ -213,6 +220,15 @@ async function handleNewToken(data) {
                 if (STOP_AFTER_FIRST_BUY) hasBought = false; // Reset lock if buy failed
                 console.log(`❌ [BUY] Buy failed for ${mintAddress}. Skipping monitoring.`);
                 sendTelegramAlert(`❌ [BUY FAILED] Could not secure ${symbol}.`);
+            }
+        }
+
+        if (client && forwardBot) {
+            try {
+                await client.sendMessage(forwardBot, { message: mintAddress });
+                console.log(`✈️  [USERBOT] Forwarded raw CA to ${forwardBot}`);
+            } catch (err) {
+                console.error(`❌ Failed to forward CA to Sigma: ${err.message}`);
             }
         }
     } else {
