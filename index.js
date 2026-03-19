@@ -132,9 +132,11 @@ async function handleNewToken(data) {
 
     if (matchX || matchTg) {
         if (STOP_AFTER_FIRST_BUY && hasBought) {
-            // Already bought a token in one-shot mode, skip this one
+            // Already bought (or buying) a token in one-shot mode, skip this one
             return;
         }
+
+        if (STOP_AFTER_FIRST_BUY) hasBought = true; // Optimistic lock
 
         console.log('\n======================================================');
         console.log('🚨 TARGET SOCIALS DETECTED ON NEW TOKEN! 🚨');
@@ -150,8 +152,6 @@ async function handleNewToken(data) {
             const bought = await jitoBuyer.buyToken(mintAddress);
             
             if (bought) {
-                hasBought = true; // Mark as bought for One-Shot mode
-                
                 // Add to position manager
                 positionManager.addPosition(mintAddress, {
                     developerAddress: data.traderPublicKey,
@@ -168,6 +168,7 @@ async function handleNewToken(data) {
                     console.log(`[MONITOR] Subscribed to trades for ${mintAddress}`);
                 }
             } else {
+                if (STOP_AFTER_FIRST_BUY) hasBought = false; // Reset lock if buy failed
                 console.log(`❌ [BUY] Buy failed for ${mintAddress}. Skipping monitoring.`);
             }
         }
