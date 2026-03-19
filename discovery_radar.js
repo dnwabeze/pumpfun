@@ -10,7 +10,9 @@ const MIN_LIKES = parseInt(process.env.MIN_LIKES_THRESHOLD || "5");
 
 const PLAYBOOK_FILE = 'alpha_playbook.json';
 const PROCESSED_FILE = 'processed_tweets.json';
+const LAST_RUN_FILE = 'last_radar_run.json';
 const MAX_TWEET_AGE_MINUTES = 4320; // 3 days
+const MIN_SCAN_GAP_MINUTES = 15; // Hard protection against restart loops
 
 let playbook = [];
 let processedTweets = new Set();
@@ -102,8 +104,23 @@ async function runRadar() {
         return;
     }
 
+    // Hard protection against restart loops
+    if (fs.existsSync(LAST_RUN_FILE)) {
+        try {
+            const { lastRun } = JSON.parse(fs.readFileSync(LAST_RUN_FILE, 'utf8'));
+            const minutesSinceLastRun = (Date.now() - lastRun) / (1000 * 60);
+            if (minutesSinceLastRun < MIN_SCAN_GAP_MINUTES) {
+                console.log(`⏳ [X-RADAR] Too soon since last run (${minutesSinceLastRun.toFixed(1)}m). Skipping to protect quota.`);
+                return;
+            }
+        } catch (e) {}
+    }
+
     isRadarRunning = true;
     console.log("🔍 [X-RADAR] Scanning for direct launch keywords...");
+    
+    // Save current run time
+    fs.writeFileSync(LAST_RUN_FILE, JSON.stringify({ lastRun: Date.now() }));
 
     // SINGLE consolidated query to save 75% of API calls
     const bigQuery = '("launching on pump.fun" OR "launching on bnb" OR "stealth launch solana" OR "stealth launch bnb" OR "dropping on pump.fun")';
@@ -136,8 +153,8 @@ async function runRadar() {
                 if (tweet.favorite_count < MIN_LIKES) continue;
                 if (tweet.user.followers_count < 100) continue;
 
-                // 4. Ultra Rate Limiting (15s between AI calls)
-                await new Promise(r => setTimeout(r, 15000));
+                // 4. Ultra Rate Limiting (30s between AI calls to stay < 2 RPM)
+                await new Promise(r => setTimeout(r, 30000));
                 analyzedCount++;
 
                 try {
@@ -162,9 +179,10 @@ async function runRadar() {
                         saveProcessed();
                     }
                 } catch (aiErr) {
-                    if (aiErr.message.includes('429')) {
-                        console.error("⛔ EXTREME RATE LIMIT: Gemini is blocked. Sleeping for 10 MINUTES...");
-                        await new Promise(r => setTimeout(r, 600000)); // 10 minute backoff
+                    const is429 = aiErr.response?.status === 429 || aiErr.message?.includes('429');
+                    if (is429) {
+                        console.error("⛔ EXTREME RATE LIMIT: Gemini is blocked. Sleeping for 15 MINUTES...");
+                        await new Promise(r => setTimeout(r, 900000)); // 15 minute backoff
                         break; 
                     } else {
                         console.error("AI Error:", aiErr.message);
