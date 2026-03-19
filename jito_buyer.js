@@ -239,32 +239,40 @@ async function buyToken(mintAddress) {
             enginesToTry = [process.env.JITO_BLOCK_ENGINE_URL, ...JITO_REGIONS.filter(r => r !== process.env.JITO_BLOCK_ENGINE_URL)];
         }
 
-        for (const engine of enginesToTry) {
-            try {
-                console.log(`[JitoBuyer] Sending bundle with ${txsToBundle.length} transactions to Jito (${new URL(engine).hostname})...`);
-                const jitoRes = await axios.post(engine, payload, {
-                    headers: { 'Content-Type': 'application/json' },
-                    timeout: 15000
-                });
+        // Try the entire region-cycling process up to 3 times
+        for (let attempt = 0; attempt < 3 && !success; attempt++) {
+            if (attempt > 0) {
+                // console.log(`[JitoBuyer] Retrying all regions for Buy (Attempt ${attempt + 1}/3)...`);
+                await new Promise(r => setTimeout(r, 500));
+            }
 
-                if (jitoRes.data?.error) {
-                    console.error(`❌ [JitoBuyer] Jito Error (${new URL(engine).hostname}):`, jitoRes.data.error);
-                    continue;
-                }
+            for (const engine of enginesToTry) {
+                try {
+                    // console.log(`[JitoBuyer] Sending bundle with ${txsToBundle.length} transactions to Jito (${new URL(engine).hostname})...`);
+                    const jitoRes = await axios.post(engine, payload, {
+                        headers: { 'Content-Type': 'application/json' },
+                        timeout: 10000
+                    });
 
-                bundleId = jitoRes.data?.result;
-                if (bundleId) {
-                    success = true;
-                    break;
+                    if (jitoRes.data?.error) {
+                        // console.error(`❌ [JitoBuyer] Jito Error (${new URL(engine).hostname}):`, jitoRes.data.error);
+                        continue;
+                    }
+
+                    bundleId = jitoRes.data?.result;
+                    if (bundleId) {
+                        success = true;
+                        break;
+                    }
+                } catch (jitoError) {
+                    // const errorMsg = jitoError.response?.data || jitoError.message;
+                    // console.error(`⚠️ [JitoBuyer] Connection failed for ${new URL(engine).hostname}: ${typeof errorMsg === 'object' ? JSON.stringify(errorMsg) : errorMsg}`);
                 }
-            } catch (jitoError) {
-                const errorMsg = jitoError.response?.data || jitoError.message;
-                console.error(`⚠️ [JitoBuyer] Connection failed for ${new URL(engine).hostname}: ${typeof errorMsg === 'object' ? JSON.stringify(errorMsg) : errorMsg}`);
             }
         }
 
         if (!success) {
-            logError(`❌ [JitoBuyer] All Jito RPC attempts failed for multi-wallet bundle.`);
+            logError(`❌ [JitoBuyer] All Jito RPC attempts failed after 3 global retries for buy bundle.`);
             return false;
         }
 
@@ -469,16 +477,31 @@ async function sellToken(mintAddress, amountPercentage = 100) {
             enginesToTry = [process.env.JITO_BLOCK_ENGINE_URL, ...JITO_REGIONS.filter(r => r !== process.env.JITO_BLOCK_ENGINE_URL)];
         }
 
-        for (const engine of enginesToTry) {
-            try {
-                const jitoRes = await axios.post(engine, payload, { timeout: 15000 });
-                bundleId = jitoRes.data?.result;
-                if (bundleId) break;
-            } catch (e) {}
+        let success = false;
+        
+        // Try the entire region-cycling process up to 3 times
+        for (let attempt = 0; attempt < 3 && !success; attempt++) {
+            if (attempt > 0) {
+                // console.log(`[JitoBuyer] Retrying all regions (Attempt ${attempt + 1}/3)...`);
+                await new Promise(r => setTimeout(r, 500));
+            }
+
+            for (const engine of enginesToTry) {
+                try {
+                    const jitoRes = await axios.post(engine, payload, { timeout: 15000 });
+                    if (jitoRes.data && jitoRes.data.result) {
+                        bundleId = jitoRes.data.result;
+                        success = true;
+                        break;
+                    }
+                } catch (error) {
+                    // console.warn(`[JitoBuyer] Failed to send to ${new URL(engine).hostname}: ${error.message}`);
+                }
+            }
         }
 
-        if (!bundleId) {
-            console.error("❌ [JitoBuyer] All Jito RPC attempts failed for multi-wallet sell bundle.");
+        if (!success) {
+            console.error("❌ [JitoBuyer] All Jito RPC attempts failed after 3 global retries for multi-wallet sell bundle.");
             return;
         }
 
