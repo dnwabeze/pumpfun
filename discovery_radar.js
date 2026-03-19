@@ -105,13 +105,9 @@ async function runRadar() {
     isRadarRunning = true;
     console.log("🔍 [X-RADAR] Scanning for direct launch keywords...");
 
-    // Simplified, direct queries
-    const queries = [
-        '"launching on pump.fun"',
-        '"launching on bnb"',
-        '"stealth launch" (solana OR bnb)',
-        '"dropping on pump.fun"'
-    ];
+    // SINGLE consolidated query to save 75% of API calls
+    const bigQuery = '("launching on pump.fun" OR "launching on bnb" OR "stealth launch solana" OR "stealth launch bnb" OR "dropping on pump.fun")';
+    const queries = [bigQuery];
 
     for (const query of queries) {
         try {
@@ -120,29 +116,28 @@ async function runRadar() {
                 headers: { 'Authorization': `Bearer ${SOCIALDATA_API_KEY}` }
             });
 
-            const tweets = (res.data.tweets || []).slice(0, 10);
-            console.log(`   Processing up to 3 best candidates for query: ${query}`);
+            const tweets = (res.data.tweets || []).slice(0, 15);
+            console.log(`   Fetched ${tweets.length} candidates. Analyzing top 4 with 15s delays...`);
 
             let analyzedCount = 0;
             for (const tweet of tweets) {
-                if (analyzedCount >= 3) break; // Reduced to 3 to stay safely under 15 RPM
+                if (analyzedCount >= 4) break; 
 
                 // 1. Deduplication
                 if (processedTweets.has(tweet.id_str)) continue;
 
-                // 2. Freshness Check (Date filter)
+                // 2. Freshness Check (3 days)
                 const createdAt = new Date(tweet.created_at);
                 const now = new Date();
                 const ageMinutes = (now - createdAt) / (1000 * 60);
-
                 if (ageMinutes > MAX_TWEET_AGE_MINUTES) continue;
 
                 // 3. Pre-filters (Engagement)
                 if (tweet.favorite_count < MIN_LIKES) continue;
                 if (tweet.user.followers_count < 100) continue;
 
-                // 4. Extreme Rate Limiting (Wait 12s between AI calls to stay < 5 RPM)
-                await new Promise(r => setTimeout(r, 12000));
+                // 4. Ultra Rate Limiting (15s between AI calls)
+                await new Promise(r => setTimeout(r, 15000));
                 analyzedCount++;
 
                 try {
@@ -168,8 +163,8 @@ async function runRadar() {
                     }
                 } catch (aiErr) {
                     if (aiErr.message.includes('429')) {
-                        console.error("⛔ Rate limited by Gemini. Cooling down for 120s...");
-                        await new Promise(r => setTimeout(r, 120000));
+                        console.error("⛔ EXTREME RATE LIMIT: Gemini is blocked. Sleeping for 10 MINUTES...");
+                        await new Promise(r => setTimeout(r, 600000)); // 10 minute backoff
                         break; 
                     } else {
                         console.error("AI Error:", aiErr.message);
