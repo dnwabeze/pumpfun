@@ -183,7 +183,16 @@ async function runRadar() {
     isRadarRunning = false;
 }
 
-// Run immediately, then interval
-runRadar();
-const interval = parseInt(process.env.DISCOVERY_INTERVAL_MIN || "5");
+// Run immediately with a jitter to avoid instant 429s on restarts
+console.log("🚦 [X-RADAR] Bot starting in 10 seconds (Rate limit protection)...");
+setTimeout(() => {
+    runRadar();
+}, 10000);
+
+const interval = parseInt(process.env.DISCOVERY_INTERVAL_MIN || "20");
 setInterval(runRadar, interval * 60 * 1000);
+
+// Global Error Handling
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
