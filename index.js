@@ -6,6 +6,12 @@ const { StringSession } = require('telegram/sessions');
 const input = require('input');
 const fs = require('fs');
 const jitoBuyer = require('./jito_buyer');
+const positionManager = require('./position_manager');
+
+const SL_PERCENT = parseFloat(process.env.SL_PERCENT || "-15");
+const TP_PERCENT = parseFloat(process.env.TP_PERCENT || "50");
+const DEV_SELL_ENABLED = process.env.DEV_SELL_ENABLED === 'true';
+
 const normalizeSocial = (url) => {
     if (!url) return '';
     return url.toLowerCase().trim()
@@ -133,7 +139,25 @@ async function handleNewToken(data) {
         console.log('======================================================\n');
 
         if (jitoBuyer.isEnabled) {
+            console.log(`[BUY] Triggering buy for ${mintAddress}...`);
             jitoBuyer.buyToken(mintAddress);
+            
+            // Add to position manager
+            // Note: We'll get the initial market cap from the next trade event or assume it's low
+            positionManager.addPosition(mintAddress, {
+                developerAddress: data.traderPublicKey,
+                buyMarketCap: data.marketCapSol || 0,
+                symbol: symbol
+            });
+
+            // Subscribe to trades for this token
+            if (globalWs && globalWs.readyState === WebSocket.OPEN) {
+                globalWs.send(JSON.stringify({
+                    method: "subscribeTokenTrade",
+                    keys: [mintAddress]
+                }));
+                console.log(`[MONITOR] Subscribed to trades for ${mintAddress}`);
+            }
         }
 
         if (client && forwardBot) {
@@ -152,6 +176,8 @@ async function handleNewToken(data) {
     }
 }
 
+let globalWs;
+
 async function startScanner() {
     if (!apiId || !apiHash) {
         console.error('❌ Error: TELEGRAM_API_ID and TELEGRAM_API_HASH are missing in .env!');
@@ -162,21 +188,80 @@ async function startScanner() {
 
     console.log(`Target X Handle: ${targetX || 'None'}`);
     console.log(`Target Telegram Handle: ${targetTelegram || 'None'}`);
+    console.log(`SL: ${SL_PERCENT}% | TP: ${TP_PERCENT}% | Dev Sell: ${DEV_SELL_ENABLED}`);
     console.log('Connecting to PumpPortal WebSocket...');
 
     const ws = new WebSocket('wss://pumpportal.fun/api/data');
+    globalWs = ws;
 
     ws.on('open', function open() {
         console.log('✅ Connected to PumpPortal Data Stream!');
         ws.send(JSON.stringify({ method: "subscribeNewToken" }));
+        
+        // Re-subscribe to existing positions
+        const openPositions = positionManager.getAllPositions();
+        const mints = Object.keys(openPositions);
+        if (mints.length > 0) {
+            ws.send(JSON.stringify({
+                method: "subscribeTokenTrade",
+                keys: mints
+            }));
+            console.log(`[MONITOR] Re-subscribed to trades for ${mints.length} existing positions.`);
+        }
     });
 
     ws.on('message', async function message(data) {
         try {
             const parsedData = JSON.parse(data);
-            if (parsedData.signature && parsedData.mint) {
+            
+            // New Token Detection
+            if (parsedData.method === "subscribeNewToken" || (parsedData.signature && parsedData.mint && !parsedData.txType)) {
                 handleNewToken(parsedData);
-            } else if (parsedData.message) {
+            } 
+            
+            // Trade Monitoring
+            else if (parsedData.txType) {
+                const mint = parsedData.mint;
+                const position = positionManager.getPosition(mint);
+                
+                if (position) {
+                    const currentMC = parsedData.marketCapSol;
+                    const trader = parsedData.traderPublicKey;
+                    const txType = parsedData.txType;
+
+                    // Update initial MC if it was 0
+                    if (position.buyMarketCap === 0 && currentMC > 0) {
+                        position.buyMarketCap = currentMC;
+                        positionManager.addPosition(mint, position);
+                        console.log(`[MONITOR] Set initial Market Cap for ${position.symbol}: ${currentMC.toFixed(2)} SOL`);
+                    }
+
+                    // 1. Check Dev Sell
+                    if (DEV_SELL_ENABLED && trader === position.developerAddress && txType === 'sell') {
+                        console.log(`🚨 [DEV SELL] Developer sold ${position.symbol}! Triggering EMERGENCY SELL.`);
+                        await jitoBuyer.sellToken(mint);
+                        positionManager.removePosition(mint);
+                        return;
+                    }
+
+                    // 2. Check SL/TP
+                    if (position.buyMarketCap > 0) {
+                        const pnlPercent = ((currentMC - position.buyMarketCap) / position.buyMarketCap) * 100;
+                        
+                        if (pnlPercent >= TP_PERCENT) {
+                            console.log(`💰 [TAKE PROFIT] ${position.symbol} hit TP: ${pnlPercent.toFixed(2)}%! Selling...`);
+                            await jitoBuyer.sellToken(mint);
+                            positionManager.removePosition(mint);
+                        } else if (pnlPercent <= SL_PERCENT) {
+                            console.log(`📉 [STOP LOSS] ${position.symbol} hit SL: ${pnlPercent.toFixed(2)}%! Selling...`);
+                            await jitoBuyer.sellToken(mint);
+                            positionManager.removePosition(mint);
+                        }
+                    }
+                }
+            }
+            
+            else if (parsedData.message) {
                 console.log(`[PumpPortal] ${parsedData.message}`);
             }
         } catch (e) {
