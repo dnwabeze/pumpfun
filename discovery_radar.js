@@ -53,20 +53,22 @@ async function analyzeTweet(tweet) {
     if (!AI_API_KEY) return null;
 
     const prompt = `
-Analyze this tweet. Is it a real announcement for an UPCOMING/NEW token launch?
-Keywords: "launching on pump.fun", "launching on bnb", "stealth launch".
+Analyze this tweet. Is it an announcement for a NEW launch?
+Identify if it is a TOKEN LAUNCH (Solana/BNB) or a PRODUCT LAUNCH (website, software, app) WITHOUT a token.
 
 Tweet: "${tweet.full_text}"
 
-If it is a high-signal NEW launch, return JSON:
+Return JSON:
 {
-  "isUpcomingLaunch": true,
+  "isLaunch": true,
+  "type": "token_launch" OR "product_launch",
+  "hasToken": true OR false,
   "confidenceScore": 90,
-  "reason": "Why this is a good lead",
-  "name": "Token Name",
-  "symbol": "Ticker"
+  "reason": "Short explanation of why this was flagged",
+  "name": "Project Name",
+  "symbol": "Ticker if any"
 }
-Otherwise return {"isUpcomingLaunch": false}.
+Otherwise return {"isLaunch": false}.
 Return ONLY JSON.
 `;
 
@@ -136,12 +138,15 @@ async function runRadar() {
                 analyzedCount++;
 
                 const analysis = await analyzeTweet(tweet);
-                if (analysis && analysis.isUpcomingLaunch && analysis.confidenceScore > 75) {
+                if (analysis && analysis.isLaunch && analysis.confidenceScore > 75) {
                     process.stdout.write('🎯 '); // Visual indicator in console
                     
-                    const alertMsg = `🦅 *ALPHA RADAR DETECTED*\n\n` +
-                        `*Token:* ${analysis.name} (${analysis.symbol})\n` +
-                        `*Confidence:* ${analysis.confidenceScore}%\n` +
+                    const typeLabel = analysis.type === 'token_launch' ? '🚀 TOKEN LAUNCH' : '🛠️ PRODUCT LAUNCH';
+                    const tokenInfo = analysis.hasToken ? `*Ticker:* $${analysis.symbol}\n` : `*No Token Detected (Product Only)*\n`;
+
+                    const alertMsg = `🦅 *RADAR DETECTION: ${typeLabel}*\n\n` +
+                        `*Project:* ${analysis.name}\n` +
+                        tokenInfo + 
                         `*Reason:* ${analysis.reason}\n\n` +
                         `*Time:* ${ageMinutes.toFixed(0)} minutes ago\n` +
                         `*Tweet:* [View on X](https://x.com/${tweet.user.screen_name}/status/${tweet.id_str})\n\n` +
