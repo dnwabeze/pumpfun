@@ -93,6 +93,16 @@ async function initTelegram() {
     fs.writeFileSync(sessionFile, client.session.save());
 }
 
+async function sendTelegramAlert(msg) {
+    if (client && forwardBot) {
+        try {
+            await client.sendMessage(forwardBot, { message: msg });
+        } catch (err) {
+            console.error(`❌ Failed to forward to Telegram: ${err.message}`);
+        }
+    }
+}
+
 async function handleNewToken(data) {
     tokensChecked++;
     if (tokensChecked % 10 === 0) {
@@ -180,6 +190,7 @@ async function handleNewToken(data) {
 
         if (jitoBuyer.isEnabled) {
             console.log(`[BUY] Triggering buy for ${mintAddress}...`);
+            sendTelegramAlert(`🟢 [BUY INITIATED]\nToken: ${name} (${symbol})\nMint: ${mintAddress}\nChart: https://pump.fun/${mintAddress}`);
             const bought = await jitoBuyer.buyToken(mintAddress);
             
             if (bought) {
@@ -201,15 +212,7 @@ async function handleNewToken(data) {
             } else {
                 if (STOP_AFTER_FIRST_BUY) hasBought = false; // Reset lock if buy failed
                 console.log(`❌ [BUY] Buy failed for ${mintAddress}. Skipping monitoring.`);
-            }
-        }
-
-        if (client && forwardBot) {
-            try {
-                await client.sendMessage(forwardBot, { message: mintAddress });
-                console.log(`✈️  Forwarded mint address to ${forwardBot}`);
-            } catch (err) {
-                console.error(`❌ Failed to forward to Telegram: ${err.message}`);
+                sendTelegramAlert(`❌ [BUY FAILED] Could not secure ${symbol}.`);
             }
         }
     } else {
@@ -283,6 +286,7 @@ async function startScanner() {
                     // 1. Check Dev Sell
                     if (DEV_SELL_ENABLED && trader === position.developerAddress && txType === 'sell') {
                         console.log(`🚨 [DEV SELL] Developer sold ${position.symbol}! Triggering EMERGENCY SELL.`);
+                        sendTelegramAlert(`🚨 [DEV DUMP DETECTED]\nDev sold ${position.symbol}! Initiating EMERGENCY SELL to protect capital.`);
                         await jitoBuyer.sellToken(mint);
                         positionManager.removePosition(mint);
                         return;
@@ -291,20 +295,20 @@ async function startScanner() {
                     // 2. Check SL/TP
                     if (position.buyMarketCap > 0) {
                         const pnlPercent = ((currentMC - position.buyMarketCap) / position.buyMarketCap) * 100;
-                        
-                        // Debug log for TP/SL check
-                        // console.log(`[CHECK] ${position.symbol} PnL: ${pnlPercent.toFixed(2)}% | SL: ${SL_PERCENT}% | TP: ${TP_PERCENT}%`);
 
                         if (pnlPercent >= TP_PERCENT) {
-                            console.log(`💰 [TAKE PROFIT] ${position.symbol} hit TP: ${pnlPercent.toFixed(2)}%! (Threshold: ${TP_PERCENT}%) Selling...`);
+                            console.log(`💰 [TAKE PROFIT] ${position.symbol} hit TP: ${pnlPercent.toFixed(2)}%! Selling...`);
+                            sendTelegramAlert(`💰 [TAKE PROFIT Hit: +${pnlPercent.toFixed(1)}%]\nSelling ${position.symbol} to secure profits!`);
                             await jitoBuyer.sellToken(mint);
                             positionManager.removePosition(mint);
                         } else if (pnlPercent <= SL_PERCENT) {
-                            console.log(`📉 [STOP LOSS] ${position.symbol} hit SL: ${pnlPercent.toFixed(2)}%! (Threshold: ${SL_PERCENT}%) Selling...`);
+                            console.log(`📉 [STOP LOSS] ${position.symbol} hit SL: ${pnlPercent.toFixed(2)}%! Selling...`);
+                            sendTelegramAlert(`📉 [STOP LOSS Hit: ${pnlPercent.toFixed(1)}%]\nPanic selling ${position.symbol} to prevent further loss...`);
                             await jitoBuyer.sellToken(mint);
                             positionManager.removePosition(mint);
                         } else if (currentMC >= KOTH_SELL_MC_SOL) {
-                            console.log(`👑 [KING OF THE HILL] ${position.symbol} breached KOTH threshold (${KOTH_SELL_MC_SOL} SOL)! Auto-Dumping to secure top...`);
+                            console.log(`👑 [KING OF THE HILL] ${position.symbol} breached KOTH (${KOTH_SELL_MC_SOL} SOL)! Auto-Dumping...`);
+                            sendTelegramAlert(`👑 [KOTH SECURED]\n${position.symbol} breached ${KOTH_SELL_MC_SOL} SOL Market Cap! Auto-Dumping to secure the top!`);
                             await jitoBuyer.sellToken(mint);
                             positionManager.removePosition(mint);
                         }
