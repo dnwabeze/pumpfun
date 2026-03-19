@@ -205,7 +205,11 @@ async function buyToken(mintAddress) {
         let success = false;
         
         // Try multiple Jito regions if one fails
-        const enginesToTry = process.env.JITO_BLOCK_ENGINE_URL ? [process.env.JITO_BLOCK_ENGINE_URL] : JITO_REGIONS;
+        let enginesToTry = [...JITO_REGIONS];
+        if (process.env.JITO_BLOCK_ENGINE_URL) {
+            // Put the user's preferred engine first, removing duplicates
+            enginesToTry = [process.env.JITO_BLOCK_ENGINE_URL, ...JITO_REGIONS.filter(r => r !== process.env.JITO_BLOCK_ENGINE_URL)];
+        }
 
         for (const engine of enginesToTry) {
             try {
