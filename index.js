@@ -13,6 +13,11 @@ const TP_PERCENT = parseFloat(process.env.TP_PERCENT || "50");
 const DEV_SELL_ENABLED = process.env.DEV_SELL_ENABLED === 'true';
 const STOP_AFTER_FIRST_BUY = process.env.STOP_AFTER_FIRST_BUY === 'true';
 
+const REQUIRE_WEBSITE = process.env.REQUIRE_WEBSITE === 'true';
+const MIN_DEV_BUY_SOL = parseFloat(process.env.MIN_DEV_BUY_SOL || "0");
+const MAX_BUNDLE_SNIPED_SOL = parseFloat(process.env.MAX_BUNDLE_SNIPED_SOL || "15");
+const KOTH_SELL_MC_SOL = parseFloat(process.env.KOTH_SELL_MC_SOL || "80");
+
 const normalizeSocial = (url) => {
     if (!url) return '';
     return url.toLowerCase().trim()
@@ -99,12 +104,15 @@ async function handleNewToken(data) {
     const symbol = data.symbol;
     let twitter = data.twitter || '';
     let telegram = data.telegram || '';
+    let website = data.website || '';
+    let meta = null;
 
     if (!twitter && !telegram && data.uri) {
-        const meta = await fetchMetadata(data.uri);
+        meta = await fetchMetadata(data.uri);
         if (meta) {
             twitter = meta.twitter || '';
             telegram = meta.telegram || '';
+            website = website || meta.website || '';
         } else {
             errorsFetch++;
             return;
@@ -131,6 +139,29 @@ async function handleNewToken(data) {
     }
 
     if (matchX || matchTg) {
+        // 1. Website Security Check
+        if (REQUIRE_WEBSITE && !website) {
+            console.log(`❌ [FILTER] Ignored ${symbol}: No Website provided.`);
+            return;
+        }
+
+        // 2 & 3. Dev Buy and Sniper Bundle Check
+        // Pump.fun virtual SOL curve starts precisely exactly at 30 SOL. 
+        // Any difference indicates SOL thrown in by the creator or bundle snipers.
+        const initialVirtualSol = 30.0;
+        const currentVirtualSol = data.vSolInBondingCurve || initialVirtualSol;
+        const totalSolSpentInBlock0 = currentVirtualSol - initialVirtualSol;
+
+        if (totalSolSpentInBlock0 < MIN_DEV_BUY_SOL) {
+            console.log(`❌ [FILTER] Ignored ${symbol}: Dev bought ${totalSolSpentInBlock0.toFixed(2)} SOL (Less than minimum ${MIN_DEV_BUY_SOL} SOL).`);
+            return;
+        }
+
+        if (totalSolSpentInBlock0 > MAX_BUNDLE_SNIPED_SOL) {
+            console.log(`❌ [FILTER] Ignored ${symbol}: Snipers bundled ${totalSolSpentInBlock0.toFixed(2)} SOL! Threat level too high.`);
+            return;
+        }
+
         if (STOP_AFTER_FIRST_BUY && hasBought) {
             // Already bought (or buying) a token in one-shot mode, skip this one
             return;
@@ -270,6 +301,10 @@ async function startScanner() {
                             positionManager.removePosition(mint);
                         } else if (pnlPercent <= SL_PERCENT) {
                             console.log(`📉 [STOP LOSS] ${position.symbol} hit SL: ${pnlPercent.toFixed(2)}%! (Threshold: ${SL_PERCENT}%) Selling...`);
+                            await jitoBuyer.sellToken(mint);
+                            positionManager.removePosition(mint);
+                        } else if (currentMC >= KOTH_SELL_MC_SOL) {
+                            console.log(`👑 [KING OF THE HILL] ${position.symbol} breached KOTH threshold (${KOTH_SELL_MC_SOL} SOL)! Auto-Dumping to secure top...`);
                             await jitoBuyer.sellToken(mint);
                             positionManager.removePosition(mint);
                         }
