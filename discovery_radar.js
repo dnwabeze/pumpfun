@@ -110,10 +110,13 @@ async function runRadar() {
                 headers: { 'Authorization': `Bearer ${SOCIALDATA_API_KEY}` }
             });
 
-            const tweets = res.data.tweets || [];
-            console.log(`   Fetched ${tweets.length} candidates for query: ${query}`);
+            const tweets = (res.data.tweets || []).slice(0, 10); // Only look at top 10 latest
+            console.log(`   Processing up to 5 best candidates for query: ${query}`);
 
+            let analyzedCount = 0;
             for (const tweet of tweets) {
+                if (analyzedCount >= 5) break; // Hard limit per category to save AI credits/rate-limits
+
                 // 1. Deduplication
                 if (processedTweets.has(tweet.id_str)) continue;
 
@@ -122,14 +125,15 @@ async function runRadar() {
                 const now = new Date();
                 const ageMinutes = (now - createdAt) / (1000 * 60);
 
-                if (ageMinutes > MAX_TWEET_AGE_MINUTES) {
-                    // console.log(`   [DEBUG] Skipping old tweet (${ageMinutes.toFixed(0)}m old)`);
-                    continue;
-                }
+                if (ageMinutes > MAX_TWEET_AGE_MINUTES) continue;
 
                 // 3. Pre-filters (Engagement)
                 if (tweet.favorite_count < MIN_LIKES) continue;
                 if (tweet.user.followers_count < 100) continue;
+
+                // 4. Rate Limiting (Wait 2s between AI calls to avoid 429)
+                await new Promise(r => setTimeout(r, 2000));
+                analyzedCount++;
 
                 const analysis = await analyzeTweet(tweet);
                 if (analysis && analysis.isUpcomingLaunch && analysis.confidenceScore > 75) {
