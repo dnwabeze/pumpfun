@@ -11,6 +11,7 @@ const positionManager = require('./position_manager');
 const SL_PERCENT = parseFloat(process.env.SL_PERCENT || "-15");
 const TP_PERCENT = parseFloat(process.env.TP_PERCENT || "50");
 const DEV_SELL_ENABLED = process.env.DEV_SELL_ENABLED === 'true';
+const STOP_AFTER_FIRST_BUY = process.env.STOP_AFTER_FIRST_BUY === 'true';
 
 const normalizeSocial = (url) => {
     if (!url) return '';
@@ -34,6 +35,7 @@ let tokensChecked = 0;
 let emptySocials = 0;
 let errorsFetch = 0;
 let client;
+let hasBought = false;
 
 const IPFS_GATEWAYS = [
     'https://cf-ipfs.com/ipfs/',
@@ -129,6 +131,11 @@ async function handleNewToken(data) {
     }
 
     if (matchX || matchTg) {
+        if (STOP_AFTER_FIRST_BUY && hasBought) {
+            // Already bought a token in one-shot mode, skip this one
+            return;
+        }
+
         console.log('\n======================================================');
         console.log('🚨 TARGET SOCIALS DETECTED ON NEW TOKEN! 🚨');
         console.log(`Mint Address: ${mintAddress}`);
@@ -141,6 +148,7 @@ async function handleNewToken(data) {
         if (jitoBuyer.isEnabled) {
             console.log(`[BUY] Triggering buy for ${mintAddress}...`);
             jitoBuyer.buyToken(mintAddress);
+            hasBought = true; // Mark as bought for One-Shot mode
             
             // Add to position manager
             // Note: We'll get the initial market cap from the next trade event or assume it's low
@@ -188,7 +196,7 @@ async function startScanner() {
 
     console.log(`Target X Handle: ${targetX || 'None'}`);
     console.log(`Target Telegram Handle: ${targetTelegram || 'None'}`);
-    console.log(`SL: ${SL_PERCENT}% | TP: ${TP_PERCENT}% | Dev Sell: ${DEV_SELL_ENABLED}`);
+    console.log(`SL: ${SL_PERCENT}% | TP: ${TP_PERCENT}% | Dev Sell: ${DEV_SELL_ENABLED} | One-Shot: ${STOP_AFTER_FIRST_BUY}`);
     console.log('Connecting to PumpPortal WebSocket...');
 
     const ws = new WebSocket('wss://pumpportal.fun/api/data');
