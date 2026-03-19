@@ -214,13 +214,13 @@ async function startScanner() {
         try {
             const parsedData = JSON.parse(data);
             
-            // New Token Detection
-            if (parsedData.method === "subscribeNewToken" || (parsedData.signature && parsedData.mint && !parsedData.txType)) {
+            // New Token Detection (txType is "create" for new tokens)
+            if (parsedData.txType === "create") {
                 handleNewToken(parsedData);
             } 
             
-            // Trade Monitoring
-            else if (parsedData.txType) {
+            // Trade Monitoring (txType is "buy" or "sell")
+            else if (parsedData.txType === "buy" || parsedData.txType === "sell") {
                 const mint = parsedData.mint;
                 const position = positionManager.getPosition(mint);
                 
