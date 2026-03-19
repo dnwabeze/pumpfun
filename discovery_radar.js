@@ -10,7 +10,7 @@ const MIN_LIKES = parseInt(process.env.MIN_LIKES_THRESHOLD || "5");
 
 const PLAYBOOK_FILE = 'alpha_playbook.json';
 const PROCESSED_FILE = 'processed_tweets.json';
-const MAX_TWEET_AGE_MINUTES = 60; // Skip anything older than 1 hour
+const MAX_TWEET_AGE_MINUTES = 4320; // 3 days
 
 let playbook = [];
 let processedTweets = new Set();
@@ -29,8 +29,8 @@ if (fs.existsSync(PROCESSED_FILE)) {
 }
 
 function saveProcessed() {
-    // Keep only last 500 to save space
-    const list = Array.from(processedTweets).slice(-500);
+    // Keep only last 2000 to save space
+    const list = Array.from(processedTweets).slice(-2000);
     fs.writeFileSync(PROCESSED_FILE, JSON.stringify(list));
 }
 
