@@ -289,26 +289,33 @@ async function getTokenBalance(connection, walletPublicKey, mintAddress, retries
 
             if (accounts.value.length === 0) {
                 if (i < retries - 1) {
+                    // console.log(`[DEBUG] No token accounts found for ${walletPublicKey} yet. Retrying...`);
                     await new Promise(r => setTimeout(r, 1000));
                     continue;
                 }
                 return 0;
             }
 
+            // Find the account matching the mint address
             const targetAccount = accounts.value.find(acc => 
                 acc.account.data.parsed.info.mint === mintAddress
             );
 
             if (!targetAccount) {
                 if (i < retries - 1) {
-                    console.log(`[BALANCE] Token account for ${mintAddress} not found yet. Retrying (${i+1}/${retries})...`);
+                    console.log(`[BALANCE] Wallet ${walletPublicKey} has ${accounts.value.length} token accounts, but not ${mintAddress} yet. Retrying...`);
+                    // Log all mints found to diagnose
+                    // const foundMints = accounts.value.map(a => a.account.data.parsed.info.mint);
+                    // console.log(`[DEBUG] Found mints: ${foundMints.join(', ')}`);
                     await new Promise(r => setTimeout(r, 1000));
                     continue;
                 }
                 return 0;
             }
 
-            return targetAccount.account.data.parsed.info.tokenAmount.amount;
+            const amount = targetAccount.account.data.parsed.info.tokenAmount.amount;
+            // console.log(`[BALANCE] Found balance for ${mintAddress}: ${amount}`);
+            return amount;
         } catch (e) {
             console.error(`Error getting token balance for ${walletPublicKey}: ${e.message}`);
             if (i < retries - 1) {
@@ -338,13 +345,21 @@ async function sellToken(mintAddress, amountPercentage = 100) {
             try {
                 const tokenBalance = await getTokenBalance(connection, wallet.publicKey.toBase58(), mintAddress);
                 
-                if (tokenBalance == 0) {
-                    console.log(`⚠️ [JitoBuyer] Skipped SELL for ${wallet.publicKey.toBase58()} - No tokens found.`);
+                if (tokenBalance == 0 || tokenBalance == "0") {
+                    console.log(`⚠️ [JitoBuyer] Skipped SELL for ${wallet.publicKey.toBase58()} - No tokens found (Balance: 0).`);
                     continue;
                 }
 
-                const sellAmount = Math.floor(tokenBalance * (amountPercentage / 100));
-                if (sellAmount == 0) continue;
+                // Balance is a string from web3.js, use BigInt for precision
+                const balanceBI = BigInt(tokenBalance);
+                const sellAmountBI = (balanceBI * BigInt(amountPercentage)) / 100n;
+                
+                if (sellAmountBI === 0n) {
+                    console.log(`⚠️ [JitoBuyer] Calculated sell amount is 0 for ${wallet.publicKey.toBase58()} (Balance: ${tokenBalance})`);
+                    continue;
+                }
+                
+                console.log(`✅ [JitoBuyer] Wallet ${wallet.publicKey.toBase58()} balance: ${tokenBalance}. Preparing sell of ${sellAmountBI.toString()}...`);
 
                 if (tipPayer === null) {
                     const solBalance = await connection.getBalance(wallet.publicKey);
@@ -358,7 +373,7 @@ async function sellToken(mintAddress, amountPercentage = 100) {
                     "action": "sell",
                     "mint": mintAddress,
                     "denominatedInSol": "false",
-                    "amount": sellAmount.toString(), // ensure it is string
+                    "amount": sellAmountBI.toString(),
                     "slippage": slippage,
                     "priorityFee": priorityFeeSol,
                     "pool": "pump"
