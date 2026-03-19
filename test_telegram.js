@@ -1,50 +1,33 @@
 require('dotenv').config();
-const { TelegramClient } = require('telegram');
-const { StringSession } = require('telegram/sessions');
-const input = require('input');
-const fs = require('fs');
+const axios = require('axios');
 
-const apiId = parseInt(process.env.TELEGRAM_API_ID);
-const apiHash = process.env.TELEGRAM_API_HASH;
-const forwardBot = process.env.FORWARD_BOT_USERNAME;
-const sessionFile = 'session.txt';
+async function sendTest() {
+    const token = process.env.TELEGRAM_BOT_TOKEN_API;
+    const chatId = process.env.TELEGRAM_CHAT_ID;
 
-async function testConnection() {
-    if (!apiId || !apiHash || !forwardBot) {
-        console.error('❌ Error: TELEGRAM_API_ID, TELEGRAM_API_HASH, or FORWARD_BOT_USERNAME is missing in .env!');
+    if (!token || !chatId) {
+        console.error("❌ Error: TELEGRAM_BOT_TOKEN_API or TELEGRAM_CHAT_ID is missing in your .env file!");
         process.exit(1);
     }
 
-    let sessionString = '';
-    if (fs.existsSync(sessionFile)) {
-        sessionString = fs.readFileSync(sessionFile, 'utf8');
-    }
-    const stringSession = new StringSession(sessionString);
-    
-    const client = new TelegramClient(stringSession, apiId, apiHash, {
-        connectionRetries: 5,
-    });
+    console.log(`Sending test message to Chat ID: ${chatId}...`);
 
-    console.log('--- Telegram Login ---');
-    await client.start({
-        phoneNumber: async () => await input.text('Please enter your phone number (+...): '),
-        password: async () => await input.text('Please enter your password (if any): '),
-        phoneCode: async () => await input.text('Please enter the code you received: '),
-        onError: (err) => console.log(err),
-    });
-
-    console.log('✅ Logged in successfully!');
-    fs.writeFileSync(sessionFile, client.session.save());
-
-    console.log(`Sending test message to ${forwardBot}...`);
     try {
-        await client.sendMessage(forwardBot, { message: 'Connection Test: It Works! 🚀' });
-        console.log('✅ Message sent! Check your Telegram bot.');
+        const response = await axios.post(`https://api.telegram.org/bot${token}/sendMessage`, {
+            chat_id: chatId,
+            text: "✅ *SYSTEM ONLINE*\n\nThis is a live test message from your Pump.fun Sniper Bot perfectly configuring your BotFather API connection!",
+            parse_mode: "Markdown",
+            disable_web_page_preview: true
+        });
+        
+        console.log("✅ Success! The test message was delivered perfectly. Check your Telegram app!");
     } catch (err) {
-        console.error(`❌ Failed to send message: ${err.message}`);
+        if (err.response && err.response.data) {
+            console.error(`❌ Telegram API rejected the message:`, err.response.data.description);
+        } else {
+            console.error(`❌ Network Error:`, err.message);
+        }
     }
-
-    process.exit(0);
 }
 
-testConnection();
+sendTest();
