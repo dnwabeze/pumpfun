@@ -1,0 +1,26 @@
+[
+  {
+    "pattern": "Countdown to launch",
+    "examples": [
+      "Launching in 2 hours! Get ready for the next moon mission on Solana.",
+      "Stealth launch at 500 retweets. The portal is opening soon.",
+      "T-minus 30 minutes until we go live on Pump.fun."
+    ]
+  },
+  {
+    "pattern": "Community Gating",
+    "examples": [
+      "Join the TG link in bio to get early access to the CA.",
+      "Whitelist for the private sale is now open. Exclusive Discord link here.",
+      "First 100 members in the portal get a special role."
+    ]
+  },
+  {
+    "pattern": "Upcoming Stealth/Fair Launch",
+    "examples": [
+      "No pre-sale, no team tokens. Stealth launching today.",
+      "The contract will be posted here exactly at 6PM UTC.",
+      "Fair launch on BNB chain. Community owned from block 0."
+    ]
+  }
+]
