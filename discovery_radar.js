@@ -9,10 +9,29 @@ const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const MIN_LIKES = parseInt(process.env.MIN_LIKES_THRESHOLD || "5");
 
 const PLAYBOOK_FILE = 'alpha_playbook.json';
+const PROCESSED_FILE = 'processed_tweets.json';
+const MAX_TWEET_AGE_MINUTES = 60; // Skip anything older than 1 hour
+
 let playbook = [];
+let processedTweets = new Set();
 
 if (fs.existsSync(PLAYBOOK_FILE)) {
     playbook = JSON.parse(fs.readFileSync(PLAYBOOK_FILE, 'utf8'));
+}
+
+if (fs.existsSync(PROCESSED_FILE)) {
+    try {
+        const data = JSON.parse(fs.readFileSync(PROCESSED_FILE, 'utf8'));
+        processedTweets = new Set(data);
+    } catch (e) {
+        processedTweets = new Set();
+    }
+}
+
+function saveProcessed() {
+    // Keep only last 500 to save space
+    const list = Array.from(processedTweets).slice(-500);
+    fs.writeFileSync(PROCESSED_FILE, JSON.stringify(list));
 }
 
 async function sendTelegramAlert(msg) {
@@ -99,22 +118,41 @@ async function runRadar() {
             console.log(`   Fetched ${tweets.length} candidates for query: ${query}`);
 
             for (const tweet of tweets) {
-                // Pre-filters
+                // 1. Deduplication
+                if (processedTweets.has(tweet.id_str)) continue;
+
+                // 2. Freshness Check (Date filter)
+                const createdAt = new Date(tweet.created_at);
+                const now = new Date();
+                const ageMinutes = (now - createdAt) / (1000 * 60);
+
+                if (ageMinutes > MAX_TWEET_AGE_MINUTES) {
+                    // console.log(`   [DEBUG] Skipping old tweet (${ageMinutes.toFixed(0)}m old)`);
+                    continue;
+                }
+
+                // 3. Pre-filters (Engagement)
                 if (tweet.favorite_count < MIN_LIKES) continue;
                 if (tweet.user.followers_count < 100) continue;
 
                 const analysis = await analyzeTweet(tweet);
                 if (analysis && analysis.isUpcomingLaunch && analysis.confidenceScore > 75) {
-                    console.log(`🎯 [ALPHA FOUND] ${analysis.name} (${analysis.symbol}) - Confidence: ${analysis.confidenceScore}%`);
+                    process.stdout.write('🎯 '); // Visual indicator in console
                     
                     const alertMsg = `🦅 *ALPHA RADAR DETECTED*\n\n` +
                         `*Token:* ${analysis.name} (${analysis.symbol})\n` +
                         `*Confidence:* ${analysis.confidenceScore}%\n` +
                         `*Reason:* ${analysis.reason}\n\n` +
+                        `*Time:* ${ageMinutes.toFixed(0)} minutes ago\n` +
                         `*Tweet:* [View on X](https://x.com/${tweet.user.screen_name}/status/${tweet.id_str})\n\n` +
                         `🤖 _AI Analysis powered by Gemini_`;
                     
                     await sendTelegramAlert(alertMsg);
+                    
+                    // Mark as processed
+                    processedTweets.add(tweet.id_str);
+                    saveProcessed();
+
                     // Sleep to avoid Telegram rate limits
                     await new Promise(r => setTimeout(r, 2000));
                 }
