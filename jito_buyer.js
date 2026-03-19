@@ -1,10 +1,13 @@
 const { Connection, Keypair, VersionedTransaction, PublicKey, SystemProgram, TransactionMessage } = require('@solana/web3.js');
 const bs58 = require('bs58').default || require('bs58');
 const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
 const RPC_URL = process.env.SOLANA_RPC_URL || "https://api.mainnet-beta.solana.com";
 const JITO_ENGINE = process.env.JITO_BLOCK_ENGINE_URL || "https://mainnet.block-engine.jito.wtf/api/v1/bundles";
+const ERROR_LOG_FILE = path.join(__dirname, 'buy_errors.log');
 
 const TIP_ACCOUNTS = [
     "96gYZGLnJYVFmbjzopPSU6QiCRg1uPXqkEw",
@@ -19,6 +22,18 @@ const TIP_ACCOUNTS = [
 
 let connection;
 let wallet;
+
+function logError(message, details = null) {
+    const timestamp = new Date().toISOString();
+    let logMessage = `[${timestamp}] ${message}\n`;
+    if (details) {
+        logMessage += `Details: ${typeof details === 'object' ? JSON.stringify(details, null, 2) : details}\n`;
+    }
+    logMessage += `------------------------------------------------------\n`;
+    
+    console.error(message);
+    fs.appendFileSync(ERROR_LOG_FILE, logMessage);
+}
 
 function init() {
     if (!process.env.SOLANA_PRIVATE_KEY) {
@@ -40,9 +55,38 @@ function init() {
         console.log(`✅ Loaded Solana Wallet: ${wallet.publicKey.toBase58()}`);
         return true;
     } catch (e) {
-        console.error("❌ Failed to parse SOLANA_PRIVATE_KEY:", e.message);
+        logError("❌ Failed to parse SOLANA_PRIVATE_KEY:", e.message);
         return false;
     }
+}
+
+async function checkBundleStatus(bundleId, retries = 5) {
+    for (let i = 0; i < retries; i++) {
+        try {
+            await new Promise(r => setTimeout(r, 2000)); // wait 2s
+            const response = await axios.post(JITO_ENGINE, {
+                jsonrpc: "2.0",
+                id: 1,
+                method: "getBundleStatuses",
+                params: [[bundleId]]
+            });
+            
+            const result = response.data?.result;
+            const status = result?.value?.[0];
+            
+            if (status) {
+                console.log(`[JitoBuyer] Bundle ${bundleId} status: ${status.confirmation_status} | Slot: ${status.slot}`);
+                if (status.confirmation_status === 'finalized' || status.confirmation_status === 'confirmed') {
+                    return true;
+                }
+            } else {
+                console.log(`[JitoBuyer] Waiting for bundle ${bundleId} to land... (Attempt ${i+1}/${retries})`);
+            }
+        } catch (e) {
+            console.error(`Error checking bundle status: ${e.message}`);
+        }
+    }
+    return false;
 }
 
 async function buyToken(mintAddress) {
@@ -51,23 +95,64 @@ async function buyToken(mintAddress) {
     try {
         console.log(`[JitoBuyer] Creating buy transaction for ${mintAddress}...`);
         
-        // 1. Get Buy Transaction from PumpPortal
+        // 0. Balance Check
+        const balance = await connection.getBalance(wallet.publicKey);
+        const buyAmountSol = parseFloat(process.env.BUY_AMOUNT_SOL || "0.01");
+        const tipAmountSol = parseFloat(process.env.JITO_TIP_AMOUNT_SOL || "0.001");
+        const priorityFeeSol = parseFloat(process.env.PRIORITY_FEE || "0.0001");
+        const totalNeeded = buyAmountSol + tipAmountSol + priorityFeeSol + 0.005;
+
+        if (process.env.JITO_DRY_RUN !== 'true' && balance / 1e9 < totalNeeded) {
+            logError(`❌ [JitoBuyer] Insufficient Balance for ${mintAddress}!`, {
+                currentBalance: balance / 1e9,
+                totalNeeded: totalNeeded,
+                buyAmount: buyAmountSol,
+                tipAmount: tipAmountSol
+            });
+            return;
+        }
+
+        // 1. Get Buy Transaction from PumpPortal with retry logic
         const localTradeParams = {
             "publicKey": wallet.publicKey.toBase58(),
             "action": "buy",
             "mint": mintAddress,
             "denominatedInSol": "true",
-            "amount": process.env.BUY_AMOUNT_SOL || 0.01,
+            "amount": buyAmountSol,
             "slippage": parseFloat(process.env.SLIPPAGE || "15"),
-            "priorityFee": parseFloat(process.env.PRIORITY_FEE || "0.0001"),
+            "priorityFee": priorityFeeSol,
             "pool": "pump"
         };
 
-        console.log(`[JitoBuyer] 🧪 Trade Params - Buy: ${localTradeParams.amount} SOL | Slippage: ${localTradeParams.slippage}% | Priority Fee: ${localTradeParams.priorityFee} SOL | Jito Tip: ${process.env.JITO_TIP_AMOUNT_SOL} SOL`);
+        console.log(`[JitoBuyer] 🧪 Trade Params: ${localTradeParams.amount} SOL | Slippage: ${localTradeParams.slippage}%`);
         
-        const response = await axios.post(`https://pumpportal.fun/api/trade-local`, localTradeParams, {
-            responseType: 'arraybuffer' // important for getting the binary transaction
-        });
+        let response;
+        const maxRetries = 5;
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                response = await axios.post(`https://pumpportal.fun/api/trade-local`, localTradeParams, {
+                    responseType: 'arraybuffer'
+                });
+                break; // Success!
+            } catch (error) {
+                let errorData = error.message;
+                if (error.response?.data) {
+                    try {
+                        errorData = JSON.parse(new TextDecoder().decode(error.response.data));
+                    } catch(e) {
+                        errorData = new TextDecoder().decode(error.response.data);
+                    }
+                }
+
+                if (attempt < maxRetries) {
+                    console.log(`⚠️ [JitoBuyer] PumpPortal simulation failed (Attempt ${attempt}/${maxRetries}). Retrying in 300ms...`);
+                    await new Promise(r => setTimeout(r, 300));
+                } else {
+                    logError(`❌ [JitoBuyer] PumpPortal API Error after ${maxRetries} attempts`, errorData);
+                    return;
+                }
+            }
+        }
 
         const tx1Bytes = new Uint8Array(response.data);
         const tx1 = VersionedTransaction.deserialize(tx1Bytes);
@@ -76,7 +161,6 @@ async function buyToken(mintAddress) {
 
         // 2. Create Tip Transaction
         const tipAccount = TIP_ACCOUNTS[Math.floor(Math.random() * TIP_ACCOUNTS.length)];
-        const tipAmountSol = parseFloat(process.env.JITO_TIP_AMOUNT_SOL || "0.001");
         const tipLamports = Math.floor(tipAmountSol * 1e9);
 
         const { blockhash } = await connection.getLatestBlockhash('finalized');
@@ -103,35 +187,50 @@ async function buyToken(mintAddress) {
             jsonrpc: "2.0",
             id: 1,
             method: "sendBundle",
-            params: [
-                [ tx1Base58, tx2Base58 ]
-            ]
+            params: [[ tx1Base58, tx2Base58 ]]
         };
 
         if (process.env.JITO_DRY_RUN === 'true') {
-            console.log(`[JitoBuyer] 🧪 DRY RUN MODE ACTIVE - Bundle successfully constructed and signed, but NOT sent.`);
-            console.log(`[JitoBuyer] 🧪 Buy Amount: ${process.env.BUY_AMOUNT_SOL} SOL | Jito Tip: ${tipAmountSol} SOL | Slippage: ${process.env.SLIPPAGE}% | Priority Fee: ${process.env.PRIORITY_FEE} SOL`);
+            console.log(`[JitoBuyer] 🧪 DRY RUN MODE ACTIVE - NOT sending.`);
             return;
         }
 
-        const jitoRes = await axios.post(JITO_ENGINE, payload, {
-            headers: { 'Content-Type': 'application/json' }
-        });
+        try {
+            const jitoRes = await axios.post(JITO_ENGINE, payload, {
+                headers: { 'Content-Type': 'application/json' }
+            });
 
-        const bundleId = jitoRes.data?.result;
-        console.log(`✅ [JitoBuyer] Bundle sent successfully! ID: ${bundleId}`);
-        console.log(`Verify bundle at: https://explorer.jito.wtf/bundle/${bundleId}`);
+            if (jitoRes.data?.error) {
+                logError(`❌ [JitoBuyer] Jito Bundle Rejected (Initial Validation Error)`, jitoRes.data.error);
+                return;
+            }
+
+            const bundleId = jitoRes.data?.result;
+            if (!bundleId) {
+                logError(`❌ [JitoBuyer] No bundleId returned`, jitoRes.data);
+                return;
+            }
+
+            console.log(`✅ [JitoBuyer] Bundle sent! ID: ${bundleId}`);
+            console.log(`Verify: https://explorer.jito.wtf/bundle/${bundleId}`);
+
+            // 4. Wait for confirmation
+            const landed = await checkBundleStatus(bundleId);
+            if (landed) {
+                console.log(`🎉 [JitoBuyer] Bundle landed successfully!`);
+            } else {
+                logError(`⚠️ [JitoBuyer] Bundle ${bundleId} did not land within timeout.`, {
+                    reason: "Likely slippage exceeded or high competition. Check Jito explorer for details.",
+                    explorer: `https://explorer.jito.wtf/bundle/${bundleId}`
+                });
+            }
+
+        } catch (jitoError) {
+            logError(`❌ [JitoBuyer] Jito RPC connection error`, jitoError.response?.data || jitoError.message);
+        }
 
     } catch (error) {
-        console.error("❌ [JitoBuyer] Error buying token:", error.message);
-        if (error.response?.data) {
-             try {
-                const text = new TextDecoder().decode(error.response.data);
-                console.error("Response:", text);
-             } catch(e) {
-                console.error("Response:", error.response.data);
-             }
-        }
+        logError("❌ [JitoBuyer] Unexpected error during buyToken:", error.stack || error.message);
     }
 }
 
