@@ -53,26 +53,21 @@ async function analyzeTweet(tweet) {
     if (!AI_API_KEY) return null;
 
     const prompt = `
-You are an expert Crypto Alpha Scout. Analyze this tweet to see if it indicates an UPCOMING token launch on Solana or BNB Chain.
-Ignore existing coins, unrelated ads, or simple shills of tokens already live.
+Analyze this tweet. Is it a real announcement for an UPCOMING/NEW token launch?
+Keywords: "launching on pump.fun", "launching on bnb", "stealth launch".
 
-Launch Playbook Patterns to look for:
-${JSON.stringify(playbook, null, 2)}
+Tweet: "${tweet.full_text}"
 
-Tweet Text: "${tweet.full_text}"
-User: ${tweet.user.screen_name} (Followers: ${tweet.user.followers_count})
-Likes: ${tweet.favorite_count}
-
-If this is a high-signal upcoming launch, return a JSON object with:
+If it is a high-signal NEW launch, return JSON:
 {
   "isUpcomingLaunch": true,
-  "confidenceScore": 0-100,
-  "reason": "Brief explanation",
-  "name": "Token Name if any",
-  "symbol": "Ticker if any"
+  "confidenceScore": 90,
+  "reason": "Why this is a good lead",
+  "name": "Token Name",
+  "symbol": "Ticker"
 }
 Otherwise return {"isUpcomingLaunch": false}.
-Return ONLY the JSON.
+Return ONLY JSON.
 `;
 
     try {
@@ -98,13 +93,14 @@ async function runRadar() {
         return;
     }
 
-    console.log("🔍 [X-RADAR] Scanning for upcoming alpha...");
+    console.log("🔍 [X-RADAR] Scanning for direct launch keywords...");
 
-    // Broad semantic queries
+    // Simplified, direct queries
     const queries = [
-        '(launch OR stealth OR dropping) AND (solana OR pump.fun) AND "link in bio"',
-        '#Solana #Memecoin (upcoming OR whitelist OR launch)',
-        '"dropping soon" (solana OR bnb) -filter:links'
+        '"launching on pump.fun"',
+        '"launching on bnb"',
+        '"stealth launch" (solana OR bnb)',
+        '"dropping on pump.fun"'
     ];
 
     for (const query of queries) {
