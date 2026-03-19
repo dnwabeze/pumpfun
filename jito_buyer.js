@@ -363,37 +363,21 @@ async function sellToken(mintAddress, amountPercentage = 100) {
 
         for (const wallet of wallets) {
             try {
-                const tokenBalance = await getTokenBalance(connection, wallet.publicKey.toBase58(), mintAddress);
-                
-                if (tokenBalance == 0 || tokenBalance == "0") {
-                    console.log(`⚠️ [JitoBuyer] Skipped SELL for ${wallet.publicKey.toBase58()} - No tokens found (Balance: 0).`);
-                    continue;
-                }
-
-                // Balance is a string from web3.js, use BigInt for precision
-                const balanceBI = BigInt(tokenBalance);
-                const sellAmountBI = (balanceBI * BigInt(amountPercentage)) / 100n;
-                
-                if (sellAmountBI === 0n) {
-                    console.log(`⚠️ [JitoBuyer] Calculated sell amount is 0 for ${wallet.publicKey.toBase58()} (Balance: ${tokenBalance})`);
-                    continue;
-                }
-                
-                console.log(`✅ [JitoBuyer] Wallet ${wallet.publicKey.toBase58()} balance: ${tokenBalance}. Preparing sell of ${sellAmountBI.toString()}...`);
-
                 if (tipPayer === null) {
                     const solBalance = await connection.getBalance(wallet.publicKey);
                     if (solBalance / 1e9 > tipAmountSol + priorityFeeSol + 0.005) {
                         tipPayer = wallet;
                     }
                 }
+                
+                console.log(`✅ [JitoBuyer] Preparing sell for ${wallet.publicKey.toBase58()} (${amountPercentage}%)...`);
 
                 const localTradeParams = {
                     "publicKey": wallet.publicKey.toBase58(),
                     "action": "sell",
                     "mint": mintAddress,
                     "denominatedInSol": "false",
-                    "amount": sellAmountBI.toString(),
+                    "amount": amountPercentage === 100 ? "100%" : `${amountPercentage}%`,
                     "slippage": slippage,
                     "priorityFee": priorityFeeSol,
                     "pool": "pump"
@@ -421,7 +405,7 @@ async function sellToken(mintAddress, amountPercentage = 100) {
                 tx.sign([wallet]);
                 txsToBundle.push(bs58.encode(tx.serialize()));
                 
-                console.log(`✅ [JitoBuyer] Prepared sell for ${wallet.publicKey.toBase58()} (${sellAmount} tokens)`);
+                console.log(`✅ [JitoBuyer] Prepared sell for ${wallet.publicKey.toBase58()} (${amountPercentage}%)`);
             } catch (err) {
                 console.error(`❌ [JitoBuyer] Failed to prepare sell for ${wallet.publicKey.toBase58()}:`, err.message);
             }
