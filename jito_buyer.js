@@ -253,7 +253,7 @@ async function buyToken(mintAddress) {
 
         if (!success) {
             logError(`❌ [JitoBuyer] All Jito RPC attempts failed for multi-wallet bundle.`);
-            return;
+            return false;
         }
 
         console.log(`✅ [JitoBuyer] Bundle sent! ID: ${bundleId}`);
@@ -262,15 +262,18 @@ async function buyToken(mintAddress) {
         const landed = await checkBundleStatus(bundleId);
         if (landed) {
             console.log(`🎉 [JitoBuyer] Multi-wallet bundle landed successfully!`);
+            return true;
         } else {
             logError(`⚠️ [JitoBuyer] Bundle ${bundleId} did not land.`, {
                 reason: "Congestion or slippage. Check Jito explorer.",
                 explorer: `https://explorer.jito.wtf/bundle/${bundleId}`
             });
+            return false;
         }
 
     } catch (error) {
         logError("❌ [JitoBuyer] Unexpected error in multi-wallet buyToken:", error.stack || error.message);
+        return false;
     }
 }
 

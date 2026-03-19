@@ -147,24 +147,28 @@ async function handleNewToken(data) {
 
         if (jitoBuyer.isEnabled) {
             console.log(`[BUY] Triggering buy for ${mintAddress}...`);
-            jitoBuyer.buyToken(mintAddress);
-            hasBought = true; // Mark as bought for One-Shot mode
+            const bought = await jitoBuyer.buyToken(mintAddress);
             
-            // Add to position manager
-            // Note: We'll get the initial market cap from the next trade event or assume it's low
-            positionManager.addPosition(mintAddress, {
-                developerAddress: data.traderPublicKey,
-                buyMarketCap: data.marketCapSol || 0,
-                symbol: symbol
-            });
+            if (bought) {
+                hasBought = true; // Mark as bought for One-Shot mode
+                
+                // Add to position manager
+                positionManager.addPosition(mintAddress, {
+                    developerAddress: data.traderPublicKey,
+                    buyMarketCap: data.marketCapSol || 0,
+                    symbol: symbol
+                });
 
-            // Subscribe to trades for this token
-            if (globalWs && globalWs.readyState === WebSocket.OPEN) {
-                globalWs.send(JSON.stringify({
-                    method: "subscribeTokenTrade",
-                    keys: [mintAddress]
-                }));
-                console.log(`[MONITOR] Subscribed to trades for ${mintAddress}`);
+                // Subscribe to trades for this token
+                if (globalWs && globalWs.readyState === WebSocket.OPEN) {
+                    globalWs.send(JSON.stringify({
+                        method: "subscribeTokenTrade",
+                        keys: [mintAddress]
+                    }));
+                    console.log(`[MONITOR] Subscribed to trades for ${mintAddress}`);
+                }
+            } else {
+                console.log(`❌ [BUY] Buy failed for ${mintAddress}. Skipping monitoring.`);
             }
         }
 
