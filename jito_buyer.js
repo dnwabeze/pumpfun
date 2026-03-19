@@ -72,6 +72,7 @@ function init() {
     }
 
     try {
+        console.log(`📡 [Solana] Connecting to RPC: ${new URL(RPC_URL).hostname}`);
         connection = new Connection(RPC_URL, "confirmed");
         return wallets.length > 0;
     } catch (e) {
