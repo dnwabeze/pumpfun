@@ -27,8 +27,7 @@ const TIP_ACCOUNTS = [
     "3AVi9Tg9Uo68tJfuvoKvqKNWKkC5wPdSSdeBnizKZ6jT"  // jitotip8
 ];
 
-let connection;
-let wallet;
+let wallets = [];
 
 function logError(message, details = null) {
     const timestamp = new Date().toISOString();
@@ -43,26 +42,40 @@ function logError(message, details = null) {
 }
 
 function init() {
-    if (!process.env.SOLANA_PRIVATE_KEY) {
-        console.warn("⚠️ SOLANA_PRIVATE_KEY not set in .env! Jito Buying disabled.");
+    const keys = [
+        process.env.SOLANA_PRIVATE_KEY,
+        process.env.SOLANA_PRIVATE_KEY_2,
+        process.env.SOLANA_PRIVATE_KEY_3,
+        process.env.SOLANA_PRIVATE_KEY_4
+    ].filter(k => k && k.trim() !== "" && !k.includes("your_"));
+
+    if (keys.length === 0) {
+        console.warn("⚠️ No valid SOLANA_PRIVATE_KEYs set in .env! Jito Buying disabled.");
         return false;
     }
+
+    wallets = [];
+    for (const privKey of keys) {
+        try {
+            let decoded;
+            if (privKey.includes('[')) {
+                decoded = Uint8Array.from(JSON.parse(privKey));
+            } else {
+                decoded = bs58.decode(privKey.trim());
+            }
+            const keypair = Keypair.fromSecretKey(decoded);
+            wallets.push(keypair);
+            console.log(`✅ Loaded Solana Wallet: ${keypair.publicKey.toBase58()}`);
+        } catch (e) {
+            logError(`❌ Failed to parse a private key:`, e.message);
+        }
+    }
+
     try {
         connection = new Connection(RPC_URL, "confirmed");
-        const privKey = process.env.SOLANA_PRIVATE_KEY.trim();
-        let decoded;
-        if (privKey.includes('[')) {
-            // JSON string array
-            decoded = Uint8Array.from(JSON.parse(privKey));
-        } else {
-            // Base58 wrapper
-            decoded = bs58.decode(privKey);
-        }
-        wallet = Keypair.fromSecretKey(decoded);
-        console.log(`✅ Loaded Solana Wallet: ${wallet.publicKey.toBase58()}`);
-        return true;
+        return wallets.length > 0;
     } catch (e) {
-        logError("❌ Failed to parse SOLANA_PRIVATE_KEY:", e.message);
+        logError("❌ Failed to initialize Solana connection:", e.message);
         return false;
     }
 }
@@ -97,123 +110,107 @@ async function checkBundleStatus(bundleId, retries = 5) {
 }
 
 async function buyToken(mintAddress) {
-    if (!wallet) return;
+    if (wallets.length === 0) return;
 
     try {
-        console.log(`[JitoBuyer] Creating buy transaction for ${mintAddress}...`);
+        console.log(`[JitoBuyer] 🚀 Starting multi-wallet buy for ${mintAddress} (${wallets.length} wallets)...`);
         
-        // 0. Balance Check
-        const balance = await connection.getBalance(wallet.publicKey);
         const buyAmountSol = parseFloat(process.env.BUY_AMOUNT_SOL || "0.01");
         const tipAmountSol = parseFloat(process.env.JITO_TIP_AMOUNT_SOL || "0.001");
         const priorityFeeSol = parseFloat(process.env.PRIORITY_FEE || "0.0001");
-        const totalNeeded = buyAmountSol + tipAmountSol + priorityFeeSol + 0.005;
-
-        if (process.env.JITO_DRY_RUN !== 'true' && balance / 1e9 < totalNeeded) {
-            logError(`❌ [JitoBuyer] Insufficient Balance for ${mintAddress}!`, {
-                currentBalance: balance / 1e9,
-                totalNeeded: totalNeeded,
-                buyAmount: buyAmountSol,
-                tipAmount: tipAmountSol
-            });
-            return;
-        }
-
-        // 1. Get Buy Transaction from PumpPortal with retry logic
-        const localTradeParams = {
-            "publicKey": wallet.publicKey.toBase58(),
-            "action": "buy",
-            "mint": mintAddress,
-            "denominatedInSol": "true",
-            "amount": buyAmountSol,
-            "slippage": parseFloat(process.env.SLIPPAGE || "15"),
-            "priorityFee": priorityFeeSol,
-            "pool": "pump"
-        };
-
-        console.log(`[JitoBuyer] 🧪 Trade Params: ${localTradeParams.amount} SOL | Slippage: ${localTradeParams.slippage}%`);
+        const slippage = parseFloat(process.env.SLIPPAGE || "15");
         
-        let response;
-        const maxRetries = 5;
-        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        const txsToBundle = [];
+        let tipPayer = null;
+
+        // 1. Prepare Buy Transactions for each wallet
+        for (const wallet of wallets) {
             try {
-                response = await axios.post(`https://pumpportal.fun/api/trade-local`, localTradeParams, {
+                const balance = await connection.getBalance(wallet.publicKey);
+                const totalNeeded = buyAmountSol + priorityFeeSol + 0.005 + (tipPayer === null ? tipAmountSol : 0);
+
+                if (balance / 1e9 < totalNeeded) {
+                    console.log(`⚠️ [JitoBuyer] Skipped ${wallet.publicKey.toBase58()} - Insufficient Balance (${(balance/1e9).toFixed(4)} SOL)`);
+                    continue;
+                }
+
+                if (tipPayer === null) tipPayer = wallet; // First wallet with balance pays the tip
+
+                const localTradeParams = {
+                    "publicKey": wallet.publicKey.toBase58(),
+                    "action": "buy",
+                    "mint": mintAddress,
+                    "denominatedInSol": "true",
+                    "amount": buyAmountSol,
+                    "slippage": slippage,
+                    "priorityFee": priorityFeeSol,
+                    "pool": "pump"
+                };
+
+                const response = await axios.post(`https://pumpportal.fun/api/trade-local`, localTradeParams, {
                     responseType: 'arraybuffer'
                 });
-                break; // Success!
-            } catch (error) {
-                let errorData = error.message;
-                if (error.response?.data) {
-                    try {
-                        errorData = JSON.parse(new TextDecoder().decode(error.response.data));
-                    } catch(e) {
-                        errorData = new TextDecoder().decode(error.response.data);
-                    }
-                }
 
-                if (attempt < maxRetries) {
-                    console.log(`⚠️ [JitoBuyer] PumpPortal simulation failed (Attempt ${attempt}/${maxRetries}). Retrying in 300ms...`);
-                    await new Promise(r => setTimeout(r, 300));
-                } else {
-                    logError(`❌ [JitoBuyer] PumpPortal API Error after ${maxRetries} attempts`, errorData);
-                    return;
-                }
+                const txBytes = new Uint8Array(response.data);
+                const tx = VersionedTransaction.deserialize(txBytes);
+                tx.sign([wallet]);
+                txsToBundle.push(bs58.encode(tx.serialize()));
+                
+                console.log(`✅ [JitoBuyer] Prepared buy for ${wallet.publicKey.toBase58()} (${buyAmountSol} SOL)`);
+            } catch (err) {
+                console.error(`❌ [JitoBuyer] Failed to prepare buy for ${wallet.publicKey.toBase58()}:`, err.message);
             }
         }
 
-        const tx1Bytes = new Uint8Array(response.data);
-        const tx1 = VersionedTransaction.deserialize(tx1Bytes);
-        tx1.sign([wallet]);
-        const tx1Base58 = bs58.encode(tx1.serialize());
+        if (txsToBundle.length === 0) {
+            logError("❌ [JitoBuyer] No wallets had sufficient balance to buy.");
+            return;
+        }
 
-        // 2. Create Tip Transaction
+        // 2. Create Tip Transaction (from the designated tipPayer)
         const tipAccount = TIP_ACCOUNTS[Math.floor(Math.random() * TIP_ACCOUNTS.length)];
         const tipLamports = Math.floor(tipAmountSol * 1e9);
-
         const { blockhash } = await connection.getLatestBlockhash('finalized');
 
         const tipInstruction = SystemProgram.transfer({
-            fromPubkey: wallet.publicKey,
+            fromPubkey: tipPayer.publicKey,
             toPubkey: new PublicKey(tipAccount),
             lamports: tipLamports
         });
 
         const messageV0 = new TransactionMessage({
-            payerKey: wallet.publicKey,
+            payerKey: tipPayer.publicKey,
             recentBlockhash: blockhash,
             instructions: [tipInstruction]
         }).compileToV0Message();
 
-        const tx2 = new VersionedTransaction(messageV0);
-        tx2.sign([wallet]);
-        const tx2Base58 = bs58.encode(tx2.serialize());
+        const tipTx = new VersionedTransaction(messageV0);
+        tipTx.sign([tipPayer]);
+        txsToBundle.push(bs58.encode(tipTx.serialize()));
 
         // 3. Send Bundle
         const payload = {
             jsonrpc: "2.0",
             id: 1,
             method: "sendBundle",
-            params: [[ tx1Base58, tx2Base58 ]]
+            params: [txsToBundle]
         };
 
         if (process.env.JITO_DRY_RUN === 'true') {
-            console.log(`[JitoBuyer] 🧪 DRY RUN MODE ACTIVE - NOT sending.`);
+            console.log(`[JitoBuyer] 🧪 DRY RUN MODE ACTIVE - ${txsToBundle.length - 1} buys + 1 tip NOT sent.`);
             return;
         }
 
         let bundleId = null;
         let success = false;
-        
-        // Try multiple Jito regions if one fails
         let enginesToTry = [...JITO_REGIONS];
         if (process.env.JITO_BLOCK_ENGINE_URL) {
-            // Put the user's preferred engine first, removing duplicates
             enginesToTry = [process.env.JITO_BLOCK_ENGINE_URL, ...JITO_REGIONS.filter(r => r !== process.env.JITO_BLOCK_ENGINE_URL)];
         }
 
         for (const engine of enginesToTry) {
             try {
-                console.log(`[JitoBuyer] Sending bundle to Jito (${new URL(engine).hostname})...`);
+                console.log(`[JitoBuyer] Sending bundle with ${txsToBundle.length} transactions to Jito (${new URL(engine).hostname})...`);
                 const jitoRes = await axios.post(engine, payload, {
                     headers: { 'Content-Type': 'application/json' },
                     timeout: 15000
@@ -221,7 +218,7 @@ async function buyToken(mintAddress) {
 
                 if (jitoRes.data?.error) {
                     console.error(`❌ [JitoBuyer] Jito Error (${new URL(engine).hostname}):`, jitoRes.data.error);
-                    continue; // Try next engine
+                    continue;
                 }
 
                 bundleId = jitoRes.data?.result;
@@ -236,26 +233,25 @@ async function buyToken(mintAddress) {
         }
 
         if (!success) {
-            logError(`❌ [JitoBuyer] All Jito RPC attempts failed.`, "Check connectivity and tip amount.");
+            logError(`❌ [JitoBuyer] All Jito RPC attempts failed for multi-wallet bundle.`);
             return;
         }
 
         console.log(`✅ [JitoBuyer] Bundle sent! ID: ${bundleId}`);
         console.log(`Verify: https://explorer.jito.wtf/bundle/${bundleId}`);
 
-        // 4. Wait for confirmation
         const landed = await checkBundleStatus(bundleId);
         if (landed) {
-            console.log(`🎉 [JitoBuyer] Bundle landed successfully!`);
+            console.log(`🎉 [JitoBuyer] Multi-wallet bundle landed successfully!`);
         } else {
-            logError(`⚠️ [JitoBuyer] Bundle ${bundleId} did not land within timeout.`, {
-                reason: "Likely slippage exceeded or high competition. Check Jito explorer for details.",
+            logError(`⚠️ [JitoBuyer] Bundle ${bundleId} did not land.`, {
+                reason: "Congestion or slippage. Check Jito explorer.",
                 explorer: `https://explorer.jito.wtf/bundle/${bundleId}`
             });
         }
 
     } catch (error) {
-        logError("❌ [JitoBuyer] Unexpected error during buyToken:", error.stack || error.message);
+        logError("❌ [JitoBuyer] Unexpected error in multi-wallet buyToken:", error.stack || error.message);
     }
 }
 
