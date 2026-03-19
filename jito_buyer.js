@@ -273,28 +273,31 @@ async function buyToken(mintAddress) {
     }
 }
 
-async function getTokenBalance(connection, walletPublicKey, mintAddress, retries = 3) {
+async function getTokenBalance(connection, walletPublicKey, mintAddress, retries = 10) {
     const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
     
     for (let i = 0; i < retries; i++) {
         try {
-            // Fetch all token accounts for the wallet - this is more reliable for new tokens
-            // than using the 'mint' filter which often fails if the mint hasn't been indexed.
             const accounts = await connection.getParsedTokenAccountsByOwner(
                 new PublicKey(walletPublicKey),
                 { programId: TOKEN_PROGRAM_ID }
             );
 
-            if (accounts.value.length === 0) return 0;
+            if (accounts.value.length === 0) {
+                if (i < retries - 1) {
+                    await new Promise(r => setTimeout(r, 1000));
+                    continue;
+                }
+                return 0;
+            }
 
-            // Find the account matching the mint address
             const targetAccount = accounts.value.find(acc => 
                 acc.account.data.parsed.info.mint === mintAddress
             );
 
             if (!targetAccount) {
-                // If not found, might be RPC lag, wait and retry
                 if (i < retries - 1) {
+                    console.log(`[BALANCE] Token account for ${mintAddress} not found yet. Retrying (${i+1}/${retries})...`);
                     await new Promise(r => setTimeout(r, 1000));
                     continue;
                 }
