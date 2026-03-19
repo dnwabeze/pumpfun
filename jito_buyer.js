@@ -274,22 +274,40 @@ async function buyToken(mintAddress) {
 }
 
 async function getTokenBalance(connection, walletPublicKey, mintAddress, retries = 3) {
+    const TOKEN_PROGRAM_ID = new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+    
     for (let i = 0; i < retries; i++) {
         try {
+            // Fetch all token accounts for the wallet - this is more reliable for new tokens
+            // than using the 'mint' filter which often fails if the mint hasn't been indexed.
             const accounts = await connection.getParsedTokenAccountsByOwner(
                 new PublicKey(walletPublicKey),
-                { mint: new PublicKey(mintAddress) }
+                { programId: TOKEN_PROGRAM_ID }
             );
 
             if (accounts.value.length === 0) return 0;
-            return accounts.value[0].account.data.parsed.info.tokenAmount.amount;
+
+            // Find the account matching the mint address
+            const targetAccount = accounts.value.find(acc => 
+                acc.account.data.parsed.info.mint === mintAddress
+            );
+
+            if (!targetAccount) {
+                // If not found, might be RPC lag, wait and retry
+                if (i < retries - 1) {
+                    await new Promise(r => setTimeout(r, 1000));
+                    continue;
+                }
+                return 0;
+            }
+
+            return targetAccount.account.data.parsed.info.tokenAmount.amount;
         } catch (e) {
-            if (e.message.includes('could not find mint') && i < retries - 1) {
-                // If mint is not found, wait a bit for RPC to index it
-                await new Promise(r => setTimeout(r, 2000));
+            console.error(`Error getting token balance for ${walletPublicKey}: ${e.message}`);
+            if (i < retries - 1) {
+                await new Promise(r => setTimeout(r, 1000));
                 continue;
             }
-            console.error(`Error getting token balance for ${walletPublicKey}: ${e.message}`);
             return 0;
         }
     }
