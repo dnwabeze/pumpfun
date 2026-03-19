@@ -58,7 +58,7 @@ Return ONLY the JSON.
 
     try {
         const response = await axios.post(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${AI_API_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${AI_API_KEY}`,
             {
                 contents: [{ parts: [{ text: prompt }] }]
             }
@@ -91,7 +91,7 @@ async function runRadar() {
     for (const query of queries) {
         try {
             const res = await axios.get(`https://api.socialdata.tools/twitter/search`, {
-                params: { q: query, type: 'Latest' },
+                params: { query: query, type: 'Latest' },
                 headers: { 'Authorization': `Bearer ${SOCIALDATA_API_KEY}` }
             });
 
