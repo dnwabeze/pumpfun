@@ -82,15 +82,21 @@ function init() {
 }
 
 async function checkBundleStatus(bundleId, retries = 5) {
+    let enginesToTry = [...JITO_REGIONS];
+    if (process.env.JITO_BLOCK_ENGINE_URL) {
+        enginesToTry = [process.env.JITO_BLOCK_ENGINE_URL, ...JITO_REGIONS.filter(r => r !== process.env.JITO_BLOCK_ENGINE_URL)];
+    }
+
     for (let i = 0; i < retries; i++) {
+        const engine = enginesToTry[i % enginesToTry.length];
         try {
             await new Promise(r => setTimeout(r, 2000)); // wait 2s
-            const response = await axios.post(JITO_ENGINE, {
+            const response = await axios.post(engine, {
                 jsonrpc: "2.0",
                 id: 1,
                 method: "getBundleStatuses",
                 params: [[bundleId]]
-            });
+            }, { timeout: 5000 });
             
             const result = response.data?.result;
             const status = result?.value?.[0];
@@ -101,10 +107,16 @@ async function checkBundleStatus(bundleId, retries = 5) {
                     return true;
                 }
             } else {
-                console.log(`[JitoBuyer] Waiting for bundle ${bundleId} to land... (Attempt ${i+1}/${retries})`);
+                console.log(`[JitoBuyer] Waiting for bundle ${bundleId} to land... (Attempt ${i+1}/${retries} via ${new URL(engine).hostname})`);
             }
         } catch (e) {
-            console.error(`Error checking bundle status: ${e.message}`);
+            if (e.response?.status === 429) {
+                // Rate limited, wait a bit longer and try next engine
+                // console.warn(`[JitoBuyer] Rate limited on ${new URL(engine).hostname}, retrying next...`);
+                await new Promise(r => setTimeout(r, 1000));
+            } else {
+                // console.error(`Error checking bundle status: ${e.message}`);
+            }
         }
     }
     return false;
