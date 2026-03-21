@@ -36,6 +36,13 @@ function saveProcessed() {
     fs.writeFileSync(PROCESSED_FILE, JSON.stringify(list));
 }
 
+function sanitizeHtml(text) {
+    if (!text) return '';
+    return text.replace(/&/g, '&amp;')
+               .replace(/</g, '&lt;')
+               .replace(/>/g, '&gt;');
+}
+
 async function sendTelegramAlert(msg) {
     if (BOT_TOKEN && CHAT_ID) {
         try {
@@ -43,7 +50,7 @@ async function sendTelegramAlert(msg) {
                 chat_id: CHAT_ID,
                 text: msg,
                 disable_web_page_preview: true,
-                parse_mode: 'Markdown'
+                parse_mode: 'HTML'
             });
         } catch (err) {
             console.error(`❌ Discovery Alert failed: ${err.message}`);
@@ -51,45 +58,7 @@ async function sendTelegramAlert(msg) {
     }
 }
 
-async function analyzeTweet(tweet) {
-    if (!AI_API_KEY) return null;
-
-    const prompt = `
-Analyze this tweet. Is it an announcement for a NEW launch?
-Identify if it is a TOKEN LAUNCH (Solana/BNB) or a PRODUCT LAUNCH (website, software, app) WITHOUT a token.
-
-Tweet: "${tweet.full_text}"
-
-Return JSON:
-{
-  "isLaunch": true,
-  "type": "token_launch" OR "product_launch",
-  "hasToken": true OR false,
-  "confidenceScore": 90,
-  "reason": "Short explanation of why this was flagged",
-  "name": "Project Name",
-  "symbol": "Ticker if any"
-}
-Otherwise return {"isLaunch": false}.
-Return ONLY JSON.
-`;
-
-    try {
-        const response = await axios.post(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-8b:generateContent?key=${AI_API_KEY}`,
-            {
-                contents: [{ parts: [{ text: prompt }] }]
-            }
-        );
-
-        const resultText = response.data.candidates[0].content.parts[0].text;
-        const cleanJson = resultText.replace(/```json/g, '').replace(/```/g, '').trim();
-        return JSON.parse(cleanJson);
-    } catch (err) {
-        console.error("AI Analysis Error:", err.message);
-        return null;
-    }
-}
+// AI Analysis removed to save costs and avoid rate limits as requested.
 
 let isRadarRunning = false;
 
@@ -133,14 +102,11 @@ async function runRadar() {
                 headers: { 'Authorization': `Bearer ${SOCIALDATA_API_KEY}` }
             });
 
-            const tweets = (res.data.tweets || []).slice(0, 15);
-            console.log(`   Fetched ${tweets.length} candidates. Analyzing top 4 with 15s delays...`);
+            const tweets = (res.data.tweets || []).slice(0, 20);
+            console.log(`   Fetched ${tweets.length} candidates. Processing filter-passing tweets...`);
 
-            let analyzedCount = 0;
             for (const tweet of tweets) {
-                if (analyzedCount >= 4) break; 
-
-                // 1. Deduplication
+                // 1. Deduplication (Critical: Don't alert same tweet twice)
                 if (processedTweets.has(tweet.id_str)) continue;
 
                 // 2. Freshness Check (3 days)
@@ -153,43 +119,25 @@ async function runRadar() {
                 if (tweet.favorite_count < MIN_LIKES) continue;
                 if (tweet.user.followers_count < 100) continue;
 
-                // 4. Ultra Rate Limiting (60s before first, 30s after)
-                const waitTime = analyzedCount === 0 ? 60000 : 30000;
-                console.log(`⏳ Waiting ${waitTime/1000}s for AI quota...`);
-                await new Promise(r => setTimeout(r, waitTime));
-                
-                analyzedCount++;
-
+                // 4. Alerting (Directly send all matches that pass filters)
                 try {
-                    const analysis = await analyzeTweet(tweet);
-                    if (analysis && analysis.isLaunch && analysis.confidenceScore > 75) {
-                        process.stdout.write('🎯 '); 
-                        
-                        const typeLabel = analysis.type === 'token_launch' ? '🚀 TOKEN LAUNCH' : '🛠️ PRODUCT LAUNCH';
-                        const tokenInfo = analysis.hasToken ? `*Ticker:* $${analysis.symbol}\n` : `*No Token Detected (Product Only)*\n`;
-
-                        const alertMsg = `🦅 *RADAR DETECTION: ${typeLabel}*\n\n` +
-                            `*Project:* ${analysis.name}\n` +
-                            tokenInfo + 
-                            `*Reason:* ${analysis.reason}\n\n` +
-                            `*Time:* ${ageMinutes.toFixed(0)} minutes ago\n` +
-                            `*Tweet:* [View on X](https://x.com/${tweet.user.screen_name}/status/${tweet.id_str})\n\n` +
-                            `🤖 _AI Analysis powered by Gemini_`;
-                        
-                        await sendTelegramAlert(alertMsg);
-                        
-                        processedTweets.add(tweet.id_str);
-                        saveProcessed();
-                    }
-                } catch (aiErr) {
-                    const is429 = aiErr.response?.status === 429 || aiErr.message?.includes('429');
-                    if (is429) {
-                        console.error("⛔ EXTREME RATE LIMIT: Gemini is blocked. Sleeping for 15 MINUTES...");
-                        await new Promise(r => setTimeout(r, 900000)); // 15 minute backoff
-                        break; 
-                    } else {
-                        console.error("AI Error:", aiErr.message);
-                    }
+                    process.stdout.write('🎯 '); 
+                    
+                    const cleanText = sanitizeHtml(tweet.full_text.substring(0, 400));
+                    const alertMsg = `🦅 <b>RADAR DETECTION: NEW MATCH</b>\n\n` +
+                        `<b>Content:</b> <i>${cleanText}${tweet.full_text.length > 400 ? '...' : ''}</i>\n\n` +
+                        `<b>User:</b> @${tweet.user.screen_name} (${tweet.user.followers_count} followers)\n` +
+                        `<b>Engagement:</b> ❤️ ${tweet.favorite_count} | 🔄 ${tweet.retweet_count}\n` +
+                        `<b>Time:</b> ${ageMinutes.toFixed(0)} minutes ago\n` +
+                        `<b>Tweet:</b> <a href="https://x.com/${tweet.user.screen_name}/status/${tweet.id_str}">View on X</a>\n\n` +
+                        `🚀 <i>Direct detection active (AI bypass mode)</i>`;
+                    
+                    await sendTelegramAlert(alertMsg);
+                    
+                    processedTweets.add(tweet.id_str);
+                    saveProcessed();
+                } catch (sendErr) {
+                    console.error("Telegram Error:", sendErr.message);
                 }
             }
         } catch (err) {
