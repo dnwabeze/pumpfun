@@ -54,25 +54,28 @@ function startWatcher() {
     ws.on('open', () => {
         console.log('✅ [Watcher] WebSocket Connected.');
         
-        // Subscription 1: Monitor logs for Pump.fun program
-        // This catches "Landed" transactions (confirmed)
-        const logSub = {
-            jsonrpc: "2.0",
-            id: 1,
-            method: "logsSubscribe",
-            params: [
-                { mentions: [PUMP_FUN_PROGRAM] },
-                { commitment: "confirmed" }
-            ]
-        };
-        ws.send(JSON.stringify(logSub));
-        console.log(`🔍 [Watcher] Subscribed to Pump.fun logs...`);
+        // Subscription: Monitor EACH follow wallet directly
+        // This is much more reliable than monitoring the whole program
+        FOLLOW_WALLETS.forEach((wallet, index) => {
+            const walletSub = {
+                jsonrpc: "2.0",
+                id: index + 1,
+                method: "logsSubscribe",
+                params: [
+                    { mentions: [wallet] },
+                    { commitment: "confirmed" }
+                ]
+            };
+            ws.send(JSON.stringify(walletSub));
+            console.log(`🔍 [Watcher] Monitoring wallet: ${wallet}`);
+        });
 
-        // Subscription 2: (Optional) If account subscription is needed for mempool
-        // Note: Standard Solana RPC doesn't have a great "mempool account follow" 
-        // but Helius Enhanced Websockets do via 'transactionSubscribe'.
-        // We will use logs for now as a robust baseline and attempt to parse 
-        // the wallets from the signatures.
+        // Keep-alive heartbeat
+        setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ jsonrpc: "2.0", method: "ping" }));
+            }
+        }, 30000);
     });
 
     ws.on('message', async (data) => {
@@ -81,12 +84,9 @@ function startWatcher() {
             
             if (message.method === 'logsNotification') {
                 const { signature, logs, err } = message.params.result;
+                console.log(`📡 [Watcher] Activity on followed wallet! Signature: ${signature.substring(0, 8)}...`);
                 
                 if (err || processedSignatures.has(signature)) return;
-
-                // Check if this signature involves any of our follow wallets
-                // Note: logNotification doesn't give us all accounts involved.
-                // We need to fetch the transaction details immediately.
                 handleTransaction(signature);
             }
         } catch (e) {
