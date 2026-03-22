@@ -17,6 +17,15 @@ module.exports = {
       env: {
         NODE_ENV: 'production'
       }
+    },
+    {
+      name: 'discovery-radar',
+      script: 'discovery_radar.js',
+      watch: false,
+      restart_delay: 3600000, // Run occasionally as it's a batch scanner
+      env: {
+        NODE_ENV: 'production'
+      }
     }
   ]
 };
