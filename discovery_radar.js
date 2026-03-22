@@ -92,7 +92,8 @@ async function runRadar() {
     fs.writeFileSync(LAST_RUN_FILE, JSON.stringify({ lastRun: Date.now() }));
 
     // SINGLE consolidated query to save 75% of API calls
-    const bigQuery = '("launching on pump.fun" OR "launching on bnb" OR "stealth launch solana" OR "stealth launch bnb" OR "dropping on pump.fun")';
+    // Broadened query to catch more launches without depending on specific phrasing
+    const bigQuery = '("launching on pump.fun" OR "stealth launch solana" OR "dropping on pump.fun" OR "pump.fun" "launch" OR "pump.fun" "live")';
     const queries = [bigQuery];
 
     for (const query of queries) {
@@ -116,8 +117,9 @@ async function runRadar() {
                 if (ageMinutes > MAX_TWEET_AGE_MINUTES) continue;
 
                 // 3. Pre-filters (Engagement)
-                if (tweet.favorite_count < MIN_LIKES) continue;
-                if (tweet.user.followers_count < 100) continue;
+                // Removed tight measures as requested
+                // if (tweet.favorite_count < MIN_LIKES) continue;
+                // if (tweet.user.followers_count < 100) continue;
 
                 // 4. Alerting (Directly send all matches that pass filters)
                 try {
