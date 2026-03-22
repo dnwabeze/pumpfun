@@ -3,6 +3,7 @@ const { Connection, PublicKey } = require('@solana/web3.js');
 const { buyToken, isEnabled: jitoEnabled } = require('./jito_buyer');
 const positionManager = require('./position_manager');
 const axios = require('axios');
+const bs58 = require('bs58').default || require('bs58');
 require('dotenv').config();
 
 const TELEGRAM_BOT_TOKEN_API = process.env.TELEGRAM_BOT_TOKEN_API;
@@ -173,17 +174,28 @@ function extractMint(tx) {
         if (!ix.programId) continue;
         const programId = ix.programId.toBase58();
         
-        if (programId === PUMP_FUN_PROGRAM) {
-            const accounts = ix.accounts || [];
+        if (programId === PUMP_FUN_PROGRAM && ix.data) {
+            const data = bs58.decode(ix.data);
+            const discriminator = data.slice(0, 8).toString('hex');
             
-            // Pump.fun Create Instruction: Mint is accounts[0]
-            if (accounts.length === 14 || accounts.length === 10) { 
-                return accounts[0].toBase58();
-            }
+            // Discriminators:
+            // create: 181ec828051c0777
+            // buy: 66063d1201daebea
+            // sell: 33e685a4017f83ad
             
-            // Pump.fun Buy Instruction: Mint is accounts[2]
-            if (accounts.length === 12 || accounts.length === 11) {
-                return accounts[2].toBase58();
+            const isCreate = discriminator === "181ec828051c0777";
+            const isBuy = discriminator === "66063d1201daebea";
+            
+            if (isCreate || isBuy) {
+                const accounts = ix.accounts || [];
+                // Create: Mint is accounts[0]
+                if (isCreate && (accounts.length === 14 || accounts.length === 10)) {
+                    return accounts[0].toBase58();
+                }
+                // Buy: Mint is accounts[2]
+                if (isBuy && (accounts.length === 12 || accounts.length === 11)) {
+                    return accounts[2].toBase58();
+                }
             }
         }
     }
