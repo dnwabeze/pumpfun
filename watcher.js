@@ -2,7 +2,26 @@ const WebSocket = require('ws');
 const { Connection, PublicKey } = require('@solana/web3.js');
 const { buyToken, isEnabled: jitoEnabled } = require('./jito_buyer');
 const positionManager = require('./position_manager');
+const axios = require('axios');
 require('dotenv').config();
+
+const TELEGRAM_BOT_TOKEN_API = process.env.TELEGRAM_BOT_TOKEN_API;
+const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+
+async function sendTelegramAlert(msg) {
+    if (TELEGRAM_BOT_TOKEN_API && TELEGRAM_CHAT_ID) {
+        try {
+            await axios.post(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN_API}/sendMessage`, {
+                chat_id: TELEGRAM_CHAT_ID,
+                text: msg,
+                disable_web_page_preview: true,
+                parse_mode: 'HTML'
+            });
+        } catch (err) {
+            console.error(`❌ [Watcher] Failed to send Telegram alert: ${err.message}`);
+        }
+    }
+}
 
 // Configuration
 const HELIUS_WS_URL = process.env.HELIUS_WS_URL;
@@ -129,6 +148,9 @@ async function handleTransaction(signature) {
                     symbol: "WATCHER-FOLLOW"
                 });
                 console.log(`✅ [Watcher] Position tracked for TP/SL!`);
+                
+                // --- NEW: Notify via Telegram ---
+                sendTelegramAlert(`🦅 <b>[WATCHER SNIPE]</b>\nTarget: ${involvedFollowWallet}\nMint: <code>${mint}</code>\nChart: https://pump.fun/${mint}\n\n<i>Position added to SL/TP monitor automatically.</i>`);
             }
         }
 
