@@ -83,7 +83,7 @@ function startWatcher() {
             const message = JSON.parse(data);
             
             if (message.method === 'logsNotification') {
-                const { signature, logs, err } = message.params.result;
+                const { signature, logs, err } = message.params.result.value;
                 console.log(`📡 [Watcher] Activity on followed wallet! Signature: ${signature.substring(0, 8)}...`);
                 
                 if (err || processedSignatures.has(signature)) return;
