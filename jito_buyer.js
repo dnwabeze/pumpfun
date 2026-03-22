@@ -162,7 +162,8 @@ async function buyToken(mintAddress, tipOverride = null) {
 
                 let response;
                 let lastError;
-                for (let i = 0; i < 3; i++) {
+                const maxRetries = 5;
+                for (let i = 0; i < maxRetries; i++) {
                     try {
                         response = await axios.post(`https://pumpportal.fun/api/trade-local`, localTradeParams, {
                             responseType: 'arraybuffer',
@@ -173,7 +174,8 @@ async function buyToken(mintAddress, tipOverride = null) {
                         lastError = e;
                         if (e.response?.status === 400) {
                             // If 400, might be too new, wait and retry
-                            await new Promise(r => setTimeout(r, 1000));
+                            console.log(`[JitoBuyer] Token ${mintAddress.substring(0,8)}... too new for API (400), retrying ${i+1}/${maxRetries}...`);
+                            await new Promise(r => setTimeout(r, 2000));
                             continue;
                         }
                         throw e;
@@ -194,7 +196,7 @@ async function buyToken(mintAddress, tipOverride = null) {
         }
 
         if (txsToBundle.length === 0) {
-            logError("❌ [JitoBuyer] No wallets had sufficient balance to buy.");
+            logError("❌ [JitoBuyer] Could not prepare any buy transactions (API 400 or Balance issue). Check logs above.");
             return;
         }
 
