@@ -12,7 +12,7 @@ const PLAYBOOK_FILE = 'alpha_playbook.json';
 const PROCESSED_FILE = 'processed_tweets.json';
 const LAST_RUN_FILE = 'last_radar_run.json';
 const MAX_TWEET_AGE_MINUTES = 4320; // 3 days
-const MIN_SCAN_GAP_MINUTES = 15; // Hard protection against restart loops
+const MIN_SCAN_GAP_MINUTES = 2; // Reduced to 2 minutes to allow easier manual restarts
 
 let playbook = [];
 let processedTweets = new Set();
