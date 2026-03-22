@@ -122,14 +122,14 @@ async function checkBundleStatus(bundleId, retries = 5) {
     return false;
 }
 
-async function buyToken(mintAddress) {
+async function buyToken(mintAddress, tipOverride = null) {
     if (wallets.length === 0) return;
 
     try {
         console.log(`[JitoBuyer] 🚀 Starting multi-wallet buy for ${mintAddress} (${wallets.length} wallets)...`);
         
         const buyAmountSol = parseFloat(process.env.BUY_AMOUNT_SOL || "0.01");
-        const tipAmountSol = parseFloat(process.env.JITO_TIP_AMOUNT_SOL || "0.001");
+        const tipAmountSol = tipOverride !== null ? tipOverride : parseFloat(process.env.JITO_TIP_AMOUNT_SOL || "0.001");
         const priorityFeeSol = parseFloat(process.env.PRIORITY_FEE || "0.0001");
         const slippage = parseFloat(process.env.SLIPPAGE || "15");
         

@@ -346,6 +346,26 @@ async function startScanner() {
     });
 
     ws.on('error', err => console.error('WebSocket error:', err));
+    
+    // --- New: Periodically check for new positions (e.g. from watcher.js) ---
+    const activeMints = new Set(Object.keys(positionManager.getAllPositions()));
+    setInterval(() => {
+        const currentPositions = positionManager.getAllPositions();
+        const currentMints = Object.keys(currentPositions);
+        
+        for (const mint of currentMints) {
+            if (!activeMints.has(mint)) {
+                activeMints.add(mint);
+                if (globalWs && globalWs.readyState === WebSocket.OPEN) {
+                    globalWs.send(JSON.stringify({
+                        method: "subscribeTokenTrade",
+                        keys: [mint]
+                    }));
+                    console.log(`[MONITOR] New position detected (from Watcher)! Subscribed to ${mint}`);
+                }
+            }
+        }
+    }, 10000); // Check every 10 seconds
 }
 
 startScanner();
