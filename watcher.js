@@ -54,7 +54,7 @@ function startWatcher() {
 
     ws.on('open', () => {
         console.log('✅ [Watcher] WebSocket Connected.');
-        
+
         // Subscription: Monitor EACH follow wallet directly
         // This is much more reliable than monitoring the whole program
         FOLLOW_WALLETS.forEach((wallet, index) => {
@@ -82,11 +82,11 @@ function startWatcher() {
     ws.on('message', async (data) => {
         try {
             const message = JSON.parse(data);
-            
+
             if (message.method === 'logsNotification') {
                 const { signature, logs, err } = message.params.result.value;
                 console.log(`📡 [Watcher] Activity on followed wallet! Signature: ${signature.substring(0, 8)}...`);
-                
+
                 if (err || processedSignatures.has(signature)) return;
                 handleTransaction(signature);
             }
@@ -129,14 +129,22 @@ async function handleTransaction(signature) {
         // On Pump.fun:
         // - 'create' instruction: The mint is usually the first account in the instruction or a new account.
         // - 'buy' instruction: The mint is always involved.
-        
+
         let mint = extractMint(tx);
         
         if (mint) {
+            // --- NEW: Prevent buying the same token multiple times ---
+            const currentPositions = positionManager.getPositions();
+            if (currentPositions[mint] || processedSignatures.has(signature)) {
+                return;
+            }
+
             console.log(`🔥 [Watcher] FOUND NEW MINT: ${mint}`);
             processedSignatures.add(signature);
             
             // 3. TRIGGER BUY
+            if (STOP_AFTER_FIRST_BUY && hasBought) return; // Final check before buy
+            
             const followTip = parseFloat(process.env.JITO_TIP_FOLLOW || "0.01");
             console.log(`🚀 [Watcher] Triggering Jito Buy with ${followTip} SOL tip...`);
             
@@ -146,6 +154,8 @@ async function handleTransaction(signature) {
             const bought = await buyToken(mint, followTip);
             
             if (bought) {
+                if (STOP_AFTER_FIRST_BUY) hasBought = true; // Lock further buys
+
                 // Track for TP/SL and monitor in index.js
                 positionManager.addPosition(mint, {
                     developerAddress: tx.transaction.message.accountKeys[3].pubkey.toBase58(), // Heuristic for bonding curve/dev
@@ -153,7 +163,7 @@ async function handleTransaction(signature) {
                     symbol: "WATCHER-FOLLOW"
                 });
                 console.log(`✅ [Watcher] Position tracked for TP/SL!`);
-                
+
                 sendTelegramAlert(`🎉 <b>[SNIPE SUCCESS]</b>\nSuccessfully bought <code>${mint}</code>!\n<i>Position added to SL/TP monitor automatically.</i>`);
             } else {
                 sendTelegramAlert(`❌ <b>[SNIPE FAILED]</b>\nBundle did not land for <code>${mint}</code>.\nCheck logs for details.`);
@@ -169,23 +179,23 @@ function extractMint(tx) {
     if (!tx || !tx.transaction || !tx.transaction.message) return null;
 
     const instructions = tx.transaction.message.instructions;
-    
+
     for (const ix of instructions) {
         if (!ix.programId) continue;
         const programId = ix.programId.toBase58();
-        
+
         if (programId === PUMP_FUN_PROGRAM && ix.data) {
             const data = bs58.decode(ix.data);
             const discriminator = data.slice(0, 8).toString('hex');
-            
+
             // Discriminators:
             // create: 181ec828051c0777
             // buy: 66063d1201daebea
             // sell: 33e685a4017f83ad
-            
+
             const isCreate = discriminator === "181ec828051c0777";
             const isBuy = discriminator === "66063d1201daebea";
-            
+
             if (isCreate || isBuy) {
                 const accounts = ix.accounts || [];
                 // Create: Mint is accounts[0]
@@ -203,7 +213,7 @@ function extractMint(tx) {
     // Fallback: PostTokenBalances
     const postBalances = tx.meta?.postTokenBalances || [];
     const nonSolMint = postBalances.find(b => b.mint !== "So11111111111111111111111111111111111111112")?.mint;
-    
+
     return nonSolMint || null;
 }
 
