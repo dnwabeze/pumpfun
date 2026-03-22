@@ -173,8 +173,11 @@ async function buyToken(mintAddress, tipOverride = null) {
                     } catch (e) {
                         lastError = e;
                         if (e.response?.status === 400) {
+                            const errorDetail = e.response.data.toString();
+                            console.log(`❌ [PumpPortal Error] ${errorDetail}`);
+                            
                             // If 400, might be too new, wait and retry
-                            console.log(`[JitoBuyer] Token ${mintAddress.substring(0,8)}... too new for API (400), retrying ${i+1}/${maxRetries}...`);
+                            console.log(`[JitoBuyer] Token ${mintAddress.substring(0,8)}... too new or invalid for API (400), retrying ${i+1}/${maxRetries}...`);
                             await new Promise(r => setTimeout(r, 2000));
                             continue;
                         }
