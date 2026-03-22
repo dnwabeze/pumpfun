@@ -138,6 +138,10 @@ async function handleTransaction(signature) {
             // 3. TRIGGER BUY
             const followTip = parseFloat(process.env.JITO_TIP_FOLLOW || "0.01");
             console.log(`🚀 [Watcher] Triggering Jito Buy with ${followTip} SOL tip...`);
+            
+            // Notify Initiation
+            sendTelegramAlert(`🟢 <b>[WATCHER INITIATED]</b>\nTarget: ${involvedFollowWallet}\nMint: <code>${mint}</code>\nTip: ${followTip} SOL\nChart: https://pump.fun/${mint}`);
+            
             const bought = await buyToken(mint, followTip);
             
             if (bought) {
@@ -149,8 +153,9 @@ async function handleTransaction(signature) {
                 });
                 console.log(`✅ [Watcher] Position tracked for TP/SL!`);
                 
-                // --- NEW: Notify via Telegram ---
-                sendTelegramAlert(`🦅 <b>[WATCHER SNIPE]</b>\nTarget: ${involvedFollowWallet}\nMint: <code>${mint}</code>\nChart: https://pump.fun/${mint}\n\n<i>Position added to SL/TP monitor automatically.</i>`);
+                sendTelegramAlert(`🎉 <b>[SNIPE SUCCESS]</b>\nSuccessfully bought <code>${mint}</code>!\n<i>Position added to SL/TP monitor automatically.</i>`);
+            } else {
+                sendTelegramAlert(`❌ <b>[SNIPE FAILED]</b>\nBundle did not land for <code>${mint}</code>.\nCheck logs for details.`);
             }
         }
 
